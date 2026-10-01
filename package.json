@@ -1,0 +1,21 @@
+{
+  "name": "deeppixel",
+  "version": "1.0.0",
+  "description": "DeepPixel: create and manage Minecraft Paper servers on your phone.",
+  "author": "DDgamer",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "setup": "node setup-android.js",
+    "build:apk": "node setup-android.js --build"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.1.2"
+  },
+  "engines": { "node": ">=18" }
+}
