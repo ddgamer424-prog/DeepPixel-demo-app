@@ -149,8 +149,8 @@ function paint(st){running=st==='running'||st==='starting';$('dd').className='do
 async function open(s){cur=s.name;ver=s.version;$('dn').textContent=s.name;$('log').textContent='';paint(s.state);cwd='';tab('console');show('detail')}
 $('ram').oninput=e=>$('ramv').textContent=e.target.value;
 $('mk').onclick=async()=>{const name=$('n').value.trim();if(!/^\w+$/.test(name))return $('pt').textContent='Use only letters, numbers and underscores.';
- $('mk').disabled=true;try{await N.createServer({name,version:$('v').value,ramMb:+$('ram').value});$('pt').textContent='Server created.';show('servers')}
- catch(e){$('pt').textContent='Could not create server: '+(e.message||e)}$('mk').disabled=false};
+ $('mk').disabled=true;const iv=setInterval(async()=>{try{hub.progress(await N.getProgress())}catch(e){}},700);try{await N.createServer({name,version:$('v').value,ramMb:+$('ram').value});$('pt').textContent='Server created.';show('servers')}
+ catch(e){$('pt').textContent='Could not create server: '+(e.message||e)}clearInterval(iv);$('mk').disabled=false};
 $('go').onclick=()=>N.start({name:cur});
 $('stp').onclick=()=>{if($('stp').textContent==='Stopping…'){if(confirm('Force stop? Unsaved progress may be lost.'))A('kill');return}
  $('stp').textContent='Stopping…';N.stop({name:cur})};

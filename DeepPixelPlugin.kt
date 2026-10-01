@@ -30,14 +30,34 @@ class DeepPixelPlugin : Plugin() {
     private fun java() = File(jre, "bin/java")
 
     private fun emit(ev: String, o: JSONObject) = notifyListeners(ev, JSObject(o.toString()))
-    private fun progress(p: Int, t: String) = emit("progress", JSONObject().put("pct", p).put("text", t))
+    @Volatile private var lastProg = JSONObject().put("pct", 0).put("text", "")
+    private fun progress(p: Int, t: String) { lastProg = JSONObject().put("pct", p).put("text", t); emit("progress", lastProg) }
+    @PluginMethod fun getProgress(call: PluginCall) = call.resolve(JSObject(lastProg.toString()))
 
     private fun download(url: String, out: File, from: Int, to: Int, label: String) {
-        val c = URL(url).openConnection(); val total = c.contentLengthLong.coerceAtLeast(1)
+        progress(from, "$label: connecting…")
+        val c = URL(url).openConnection().apply { connectTimeout = 20000; readTimeout = 30000; setRequestProperty("User-Agent", "DeepPixel/1.0") }
+        val total = c.contentLengthLong
         c.getInputStream().use { i -> out.outputStream().use { o ->
-            val buf = ByteArray(65536); var done = 0L; var n: Int
+            val buf = ByteArray(65536); var done = 0L; var n: Int; var last = 0L
             while (i.read(buf).also { n = it } > 0) { o.write(buf, 0, n); done += n
-                progress(from + ((to - from) * done / total).toInt(), label) } } }
+                if (System.currentTimeMillis() - last > 300) { last = System.currentTimeMillis()
+                    progress(if (total > 0) from + ((to - from) * done / total).toInt() else from, "$label: ${done / 1048576} MB") } } } }
+    }
+
+    private fun paperDownload(ver: String, out: File, from: Int, to: Int) {
+        val url = try {   // PaperMC's current downloads service first, old API only as a fallback
+            val b = JSONArray(get("https://fill.papermc.io/v3/projects/paper/versions/$ver/builds"))
+            var u: String? = null
+            for (i in 0 until b.length()) { val o = b.getJSONObject(i)
+                if (o.optString("channel") == "STABLE") { u = o.getJSONObject("downloads").getJSONObject("server:default").getString("url"); break } }
+            u ?: b.getJSONObject(0).getJSONObject("downloads").getJSONObject("server:default").getString("url")
+        } catch (e: Exception) {
+            val builds = JSONObject(get("https://api.papermc.io/v2/projects/paper/versions/$ver/builds")).getJSONArray("builds")
+            val b = builds.getJSONObject(builds.length() - 1).getInt("build")
+            "https://api.papermc.io/v2/projects/paper/versions/$ver/builds/$b/downloads/paper-$ver-$b.jar"
+        }
+        download(url, out, from, to, "Downloading Paper $ver")
     }
 
     @PluginMethod fun createServer(call: PluginCall) {
@@ -47,20 +67,24 @@ class DeepPixelPlugin : Plugin() {
             try {
                 if (!java().exists()) {
                     val tgz = File(context.cacheDir, "jre.tgz"); val url = jreUrl(); require(url.startsWith("http") && !url.contains("YOUR-HOST")) { "Set the Java runtime link first (Create tab)" }
-                    download(url, tgz, 0, 50, "Installing Java 21…")
-                    jre.mkdirs(); Runtime.getRuntime().exec(arrayOf("tar", "xzf", tgz.path, "-C", jre.path, "--strip-components=1")).waitFor()
-                    java().setExecutable(true); tgz.delete()
+                    download(url, tgz, 0, 45, "Downloading Java")
+                    progress(46, "Unpacking Java…"); jre.deleteRecursively(); jre.mkdirs()
+                    val t = ProcessBuilder("tar", "xzf", tgz.path, "-C", jre.path, "--strip-components=1").redirectErrorStream(true).start()
+                    val tout = t.inputStream.bufferedReader().readText(); t.waitFor(); tgz.delete()
+                    require(java().exists()) { "Java unpack failed: ${tout.take(300)}" }
+                    File(jre, "bin").listFiles()?.forEach { it.setExecutable(true) }
+                    progress(48, "Checking Java…")
+                    val v = ProcessBuilder(java().path, "-version").redirectErrorStream(true).start()
+                    val vout = v.inputStream.bufferedReader().readText(); v.waitFor()
+                    if (!vout.contains("version")) { jre.deleteRecursively(); throw IllegalStateException("Java does not run on this phone: ${vout.take(300)}") }
                 }
                 val dir = File(root, name).apply { mkdirs() }
-                val builds = JSONObject(URL("https://api.papermc.io/v2/projects/paper/versions/$ver/builds").readText()).getJSONArray("builds")
-                val b = builds.getJSONObject(builds.length() - 1).getInt("build")
-                download("https://api.papermc.io/v2/projects/paper/versions/$ver/builds/$b/downloads/paper-$ver-$b.jar",
-                    File(dir, "paper.jar"), 50, 100, "Downloading Paper $ver…")
+                paperDownload(ver, File(dir, "paper.jar"), 50, 100)
                 File(dir, "eula.txt").writeText("eula=true\n")   // the user accepts Mojang's EULA in the UI before this
                 File(dir, "server.properties").writeText("motd=$name\nmax-players=10\nview-distance=6\n")
                 File(dir, "meta.json").writeText(JSONObject().put("name", name).put("version", ver).put("ramMb", ram).toString())
                 call.resolve()
-            } catch (e: Exception) { call.reject(e.message ?: "Setup failed") }
+            } catch (e: Throwable) { call.reject(e.message ?: e.toString()) }
         }
     }
 
@@ -105,8 +129,8 @@ class DeepPixelPlugin : Plugin() {
     // ================= helpers =================
     private val players = HashMap<String, MutableSet<String>>()
     private fun nm(c: PluginCall) = c.getString("name")!!
-    private fun bg(call: PluginCall, body: () -> Unit) { thread { try { body() } catch (e: Exception) { call.reject(e.message ?: "Failed") } } }
-    private fun get(u: String): String { val c = URL(u).openConnection(); c.setRequestProperty("User-Agent", "DeepPixel/1.0"); return c.getInputStream().bufferedReader().readText() }
+    private fun bg(call: PluginCall, body: () -> Unit) { thread { try { body() } catch (e: Throwable) { call.reject(e.message ?: e.toString()) } } }
+    private fun get(u: String): String { val c = URL(u).openConnection(); c.connectTimeout = 20000; c.readTimeout = 30000; c.setRequestProperty("User-Agent", "DeepPixel/1.0"); return c.getInputStream().bufferedReader().readText() }
     private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
     private fun safe(n: String, rel: String): File {           // blocks ../ escapes
         val base = File(root, n).canonicalFile; val f = File(base, rel).canonicalFile
@@ -208,9 +232,7 @@ class DeepPixelPlugin : Plugin() {
         f.writeText(m.toString()); call.resolve() }
     @PluginMethod fun changeVersion(call: PluginCall) = bg(call) {   // also used for "reinstall jar"
         val n = nm(call); require(procs[n]?.isAlive != true) { "Stop the server first" }; val ver = call.getString("version")!!
-        val builds = JSONObject(get("https://api.papermc.io/v2/projects/paper/versions/$ver/builds")).getJSONArray("builds")
-        val b = builds.getJSONObject(builds.length() - 1).getInt("build")
-        download("https://api.papermc.io/v2/projects/paper/versions/$ver/builds/$b/downloads/paper-$ver-$b.jar", File(root, "$n/paper.jar"), 0, 100, "Downloading Paper $ver…")
+        paperDownload(ver, File(root, "$n/paper.jar"), 0, 100)
         val f = File(root, "$n/meta.json"); f.writeText(JSONObject(f.readText()).put("version", ver).toString()); call.resolve() }
     @PluginMethod fun playersList(call: PluginCall) = call.resolve(JSObject().put("list", JSONArray((players[nm(call)] ?: setOf<String>()).toList())))
 
