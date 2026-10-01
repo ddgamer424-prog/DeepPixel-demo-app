@@ -9,13 +9,26 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - run: |
-          gh release download jre17-ec28559 --repo PojavLauncherTeam/android-openjdk-build-multiarch --pattern 'universal.tar.xz' --pattern 'bin-arm64.tar.xz' --dir dl
+          gh release download jre22-6.0.0 --repo QuestCraftPlusPlus/android-openjdk-build-multiarch --dir dl
+          ls -la dl
           mkdir x
-          for f in dl/*.tar.xz; do tar -xJf "$f" -C x; done
+          for f in dl/*; do
+            n=$(basename "$f")
+            case "$n" in
+              *x86*|*i686*|bin-arm.*|*-arm-*|*armv7*|*.txt|*.sha*|version) echo "skip $n"; continue;;
+            esac
+            case "$n" in
+              *.tar.xz) tar -xJf "$f" -C x;;
+              *.tar.gz|*.tgz) tar -xzf "$f" -C x;;
+              *.tar) tar -xf "$f" -C x;;
+              *.zip) unzip -q "$f" -d x;;
+              *) echo "unknown type: $n";;
+            esac
+          done
           j=$(find x -type f -path '*/bin/java' | head -1)
-          test -n "$j" || { echo "bin/java not found"; find x | head -50; exit 1; }
+          test -n "$j" || { echo "bin/java not found"; find x | head -80; exit 1; }
           r=$(dirname "$(dirname "$j")")
           mkdir pkg && cp -a "$r" pkg/jre
           tar -czf jre.tar.gz -C pkg jre
-          gh release delete java17 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create java17 jre.tar.gz --repo "$GITHUB_REPOSITORY" --title "Java 17 for Android" --notes "Java 17 for DeepPixel"
+          gh release delete java22 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create java22 jre.tar.gz --repo "$GITHUB_REPOSITORY" --title "Java 22 for Android" --notes "Java runtime for DeepPixel"
