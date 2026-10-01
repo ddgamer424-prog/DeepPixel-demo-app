@@ -87,7 +87,7 @@ class DeepPixelPlugin : Plugin() {
                 val dir = File(root, name).apply { mkdirs() }
                 paperDownload(ver, File(dir, "paper.jar"), 50, 100)
                 File(dir, "eula.txt").writeText("eula=true\n")   // the user accepts Mojang's EULA in the UI before this
-                File(dir, "server.properties").writeText("motd=$name\nmax-players=10\nview-distance=6\n")
+                File(dir, "server.properties").writeText("motd=$name\nmax-players=10\nview-distance=6\nserver-port=${25565 + (root.listFiles()?.count { File(it, "meta.json").exists() } ?: 0)}\n")
                 File(dir, "meta.json").writeText(JSONObject().put("name", name).put("version", ver).put("ramMb", ram).toString())
                 call.resolve()
             } catch (e: Throwable) { call.reject(e.message ?: e.toString()) }
@@ -106,13 +106,16 @@ class DeepPixelPlugin : Plugin() {
         val m = JSONObject(File(dir, "meta.json").readText()); val ram = m.getInt("ramMb")
         val args = mutableListOf(java().path, "-Xmx${ram}M", "-Xms${ram / 2}M")
         if (m.optInt("cores", 0) > 0) args.add("-XX:ActiveProcessorCount=${m.getInt("cores")}")
-        if (m.optBoolean("optimize", true)) args.addAll(listOf("-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200", "-XX:+DisableExplicitGC", "-XX:+ParallelRefProcEnabled"))
+        if (m.optBoolean("optimize", true)) args.addAll(listOf("-XX:+UseSerialGC", "-XX:+DisableExplicitGC"))
         File(dir, "tmp").mkdirs()
-        args.addAll(listOf("-Djava.io.tmpdir=${File(dir, "tmp").path}", "-Duser.home=${dir.path}", "-jar", "paper.jar", "nogui"))
+        args.addAll(listOf("-Djava.io.tmpdir=${File(dir, "tmp").path}", "-Duser.home=${dir.path}", "-Djava.net.preferIPv4Stack=true", "-jar", "paper.jar", "nogui"))
         val p = javaEnv(ProcessBuilder(args)).directory(dir).redirectErrorStream(true).start()
         ServerService.start(context)
         procs[name] = p; emit("state", JSONObject().put("name", name).put("state", "running"))
         thread { p.inputStream.bufferedReader().forEachLine { trackPlayers(name, it); emit("console", JSONObject().put("name", name).put("line", it)) }
+            val code = try { p.waitFor() } catch (e: Exception) { -1 }
+            val why = when (code) { 0 -> "stopped normally"; 137 -> "was killed by Android (memory or battery limit)"; 134, 135, 139 -> "crashed (Java native error)"; else -> "ended unexpectedly" }
+            emit("console", JSONObject().put("name", name).put("line", "[DeepPixel] Server $why (exit code $code)"))
             players.remove(name); emit("state", JSONObject().put("name", name).put("state", "stopped"))
             if (procs.values.none { it.isAlive }) ServerService.stop(context) }
         call.resolve()
@@ -242,6 +245,15 @@ class DeepPixelPlugin : Plugin() {
         paperDownload(ver, File(root, "$n/paper.jar"), 0, 100)
         val f = File(root, "$n/meta.json"); f.writeText(JSONObject(f.readText()).put("version", ver).toString()); call.resolve() }
     @PluginMethod fun playersList(call: PluginCall) = call.resolve(JSObject().put("list", JSONArray((players[nm(call)] ?: setOf<String>()).toList())))
+
+    @PluginMethod fun getNetworkInfo(call: PluginCall) {
+        val ips = JSONArray()
+        try { java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces()).forEach { ni ->
+            if (ni.isUp && !ni.isLoopback) java.util.Collections.list(ni.inetAddresses).filterIsInstance<java.net.Inet4Address>()
+                .forEach { a -> ips.put(JSONObject().put("iface", ni.name).put("ip", a.hostAddress)) } } } catch (e: Exception) { }
+        val f = props(nm(call))
+        val port = (if (f.exists()) f.readLines().firstOrNull { it.startsWith("server-port=") }?.substringAfter("=")?.trim()?.toIntOrNull() else null) ?: 25565
+        call.resolve(JSObject().put("ips", ips).put("port", port)) }
 
     // ================= public tunnel (playit.gg agent) =================
     private var tunnel: Process? = null

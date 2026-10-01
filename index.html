@@ -91,6 +91,7 @@ button,nav button,#tb button{min-height:44px}
  <div id="tb"><button data-p="console">Console</button><button data-p="plugins">Plugins</button><button data-p="files">Files</button><button data-p="worlds">Worlds</button><button data-p="backups">Backups</button><button data-p="settings">Settings</button></div>
 
  <div class="pane" id="p-console"><div class="chip" id="st">Live stats appear while the server runs.</div><div class="chip" id="pl">No players online</div>
+  <div class="card" id="addrc"><div class="mut">Join address</div><div id="addr" style="font:700 20px ui-monospace,Menlo,monospace;word-break:break-all;margin:4px 0">-</div><div class="mut" id="addrh"></div><button id="cpy" class="alt" style="margin-top:10px">Copy address</button></div>
   <div id="log"></div><div class="row" style="margin-top:8px"><input id="cmd" placeholder="Command, e.g. op Steve"><button id="snd">Send</button></div></div>
 
  <div class="pane hide" id="p-plugins"><div class="row"><input id="plq" placeholder="Search plugins on Modrinth"><button id="pls">Search</button></div>
@@ -146,7 +147,7 @@ async function renderList(){const {servers}=await N.listServers();const el=$('se
 let running=false,restartPending=false;
 function paint(st){running=st==='running'||st==='starting';$('dd').className='dot '+(st==='running'?'on':st==='starting'?'busy':'');
  $('go').disabled=running;$('rs').disabled=!running;$('stp').disabled=!running;$('stp').textContent='Stop'}
-async function open(s){cur=s.name;ver=s.version;$('dn').textContent=s.name;$('log').textContent='';paint(s.state);cwd='';tab('console');show('detail')}
+async function open(s){cur=s.name;ver=s.version;$('dn').textContent=s.name;$('log').textContent='';paint(s.state);cwd='';tab('console');show('detail');showAddr()}
 $('ram').oninput=e=>$('ramv').textContent=e.target.value;
 $('mk').onclick=async()=>{const name=$('n').value.trim();if(!/^\w+$/.test(name))return $('pt').textContent='Use only letters, numbers and underscores.';
  $('mk').disabled=true;const iv=setInterval(async()=>{try{hub.progress(await N.getProgress())}catch(e){}},700);try{await N.createServer({name,version:$('v').value,ramMb:+$('ram').value});$('pt').textContent='Server created.';show('servers')}
@@ -200,5 +201,13 @@ setInterval(async()=>{if(cur&&!$('detail').classList.contains('hide')&&running){
  if(s.usedMb!=null)$('st').textContent='Server RAM '+s.usedMb+' MB · phone free '+s.availMb+' MB · '+s.cores+' cores'}},3000);
 N.getJreUrl().then(r=>{if(r.url&&!r.url.includes('YOUR-HOST'))$('jre').value=r.url}).catch(()=>{});
 $('jres').onclick=async()=>{await N.setJreUrl({url:$('jre').value.trim()});$('jres').textContent='Saved';setTimeout(()=>$('jres').textContent='Save link',1200)};
+let addrText='';
+async function showAddr(){if(!cur||$('detail').classList.contains('hide'))return;try{const r=await A('getNetworkInfo');const ips=r.ips||[];const w=ips.find(i=>/^(wlan|swlan|ap)/.test(i.iface))||ips[0];
+ if(!w){addrText='';$('addr').textContent='No network';$('addrh').textContent='Connect to Wi-Fi or turn on your hotspot.';return}
+ addrText=w.ip+':'+r.port;$('addr').textContent=addrText;
+ const o=ips.filter(i=>i!==w).map(i=>i.ip+' ('+i.iface+')').join(', ');
+ $('addrh').textContent='Players on the same Wi-Fi or hotspot can join with this address.'+(o?' Other addresses: '+o+'.':'')+' For friends over the internet, start the tunnel in Settings.'}catch(e){}}
+$('cpy').onclick=async()=>{if(!addrText)return;try{await navigator.clipboard.writeText(addrText);$('cpy').textContent='Copied'}catch(e){prompt('Copy this address',addrText)}setTimeout(()=>$('cpy').textContent='Copy address',1200)};
+setInterval(showAddr,5000);
 renderList();
 </script></body></html>
