@@ -42,6 +42,10 @@ public class MainActivity extends BridgeActivity {
 }
 `);
 
+// Signing key: shipped as text (.b64) so uploads can't corrupt it; decoded here for every build
+const b64 = path.join(root, 'deeppixel.keystore.b64');
+if (fs.existsSync(b64)) fs.writeFileSync(path.join(root, 'deeppixel.keystore'), Buffer.from(fs.readFileSync(b64, 'utf8').replace(/\s+/g, ''), 'base64'));
+
 // Manifest: permissions + foreground service
 patch(path.join(droid, 'app/src/main/AndroidManifest.xml'), s => {
   if (s.includes('ServerService')) return s;
