@@ -1,0 +1,21 @@
+name: Prepare Java
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  java:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - run: |
+          gh release download jre17-ec28559 --repo PojavLauncherTeam/android-openjdk-build-multiarch --pattern 'universal.tar.xz' --pattern 'bin-arm64.tar.xz' --dir dl
+          mkdir x
+          for f in dl/*.tar.xz; do tar -xJf "$f" -C x; done
+          j=$(find x -type f -path '*/bin/java' | head -1)
+          test -n "$j" || { echo "bin/java not found"; find x | head -50; exit 1; }
+          r=$(dirname "$(dirname "$j")")
+          mkdir pkg && cp -a "$r" pkg/jre
+          tar -czf jre.tar.gz -C pkg jre
+          gh release delete java17 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create java17 jre.tar.gz --repo "$GITHUB_REPOSITORY" --title "Java 17 for Android" --notes "Java 17 for DeepPixel"
