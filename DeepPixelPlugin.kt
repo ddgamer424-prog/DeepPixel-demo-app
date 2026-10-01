@@ -28,6 +28,12 @@ class DeepPixelPlugin : Plugin() {
     private val root get() = File(context.filesDir, "servers").apply { mkdirs() }
     private val jre get() = File(context.filesDir, "jre")
     private fun java() = File(jre, "bin/java")
+    private fun javaEnv(pb: ProcessBuilder): ProcessBuilder {   // Android doesn't follow the Java folder layout on its own
+        val j = jre.path
+        pb.environment()["LD_LIBRARY_PATH"] = listOf("lib/jli", "lib/server", "lib", "lib/aarch64/jli", "lib/aarch64/server", "lib/aarch64").joinToString(":") { "$j/$it" }
+        pb.environment()["JAVA_HOME"] = j
+        return pb
+    }
 
     private fun emit(ev: String, o: JSONObject) = notifyListeners(ev, JSObject(o.toString()))
     @Volatile private var lastProg = JSONObject().put("pct", 0).put("text", "")
@@ -74,7 +80,7 @@ class DeepPixelPlugin : Plugin() {
                     require(java().exists()) { "Java unpack failed: ${tout.take(300)}" }
                     File(jre, "bin").listFiles()?.forEach { it.setExecutable(true) }
                     progress(48, "Checking Java…")
-                    val v = ProcessBuilder(java().path, "-version").redirectErrorStream(true).start()
+                    val v = javaEnv(ProcessBuilder(java().path, "-version")).redirectErrorStream(true).start()
                     val vout = v.inputStream.bufferedReader().readText(); v.waitFor()
                     if (!vout.contains("version")) { jre.deleteRecursively(); throw IllegalStateException("Java does not run on this phone: ${vout.take(300)}") }
                 }
@@ -101,8 +107,9 @@ class DeepPixelPlugin : Plugin() {
         val args = mutableListOf(java().path, "-Xmx${ram}M", "-Xms${ram / 2}M")
         if (m.optInt("cores", 0) > 0) args.add("-XX:ActiveProcessorCount=${m.getInt("cores")}")
         if (m.optBoolean("optimize", true)) args.addAll(listOf("-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200", "-XX:+DisableExplicitGC", "-XX:+ParallelRefProcEnabled"))
-        args.addAll(listOf("-jar", "paper.jar", "nogui"))
-        val p = ProcessBuilder(args).directory(dir).redirectErrorStream(true).start()
+        File(dir, "tmp").mkdirs()
+        args.addAll(listOf("-Djava.io.tmpdir=${File(dir, "tmp").path}", "-Duser.home=${dir.path}", "-jar", "paper.jar", "nogui"))
+        val p = javaEnv(ProcessBuilder(args)).directory(dir).redirectErrorStream(true).start()
         ServerService.start(context)
         procs[name] = p; emit("state", JSONObject().put("name", name).put("state", "running"))
         thread { p.inputStream.bufferedReader().forEachLine { trackPlayers(name, it); emit("console", JSONObject().put("name", name).put("line", it)) }

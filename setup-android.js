@@ -54,9 +54,15 @@ patch(path.join(droid, 'app/src/main/AndroidManifest.xml'), s => {
 // Kotlin support (the plugin is written in Kotlin)
 patch(path.join(droid, 'build.gradle'), s => s.includes('kotlin-gradle-plugin') ? s :
   s.replace(/(classpath\s+['"]com\.android\.tools\.build:gradle:[^'"]+['"])/, "$1\n        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'"));
-patch(path.join(droid, 'app/build.gradle'), s => s.includes('kotlin-android') ? s :
-  s.replace("apply plugin: 'com.android.application'", "apply plugin: 'com.android.application'\napply plugin: 'kotlin-android'")
-   .replace(/android\s*\{/, "android {\n    kotlinOptions { jvmTarget = '17' }"));
+patch(path.join(droid, 'app/build.gradle'), s => {
+  if (!s.includes('kotlin-android'))
+    s = s.replace("apply plugin: 'com.android.application'", "apply plugin: 'com.android.application'\napply plugin: 'kotlin-android'")
+         .replace(/android\s*\{/, "android {\n    kotlinOptions { jvmTarget = '17' }");
+  // Same signing key every build, so updates install over the old app (keeps your servers and Java)
+  if (!s.includes('deeppixel.keystore') && fs.existsSync(path.join(root, 'deeppixel.keystore')))
+    s = s.replace(/android\s*\{/, 'android {\n    signingConfigs { debug { storeFile file("../../deeppixel.keystore"); storePassword "deeppixel"; keyAlias "deeppixel"; keyPassword "deeppixel" } }');
+  return s;
+});
 
 // SDK levels: minSdk 26 (foreground service APIs); targetSdk 28 so Android lets the app run the Java runtime from its own storage
 patch(path.join(droid, 'variables.gradle'), s =>
