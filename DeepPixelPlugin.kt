@@ -241,9 +241,19 @@ class DeepPixelPlugin : Plugin() {
 
     // ================= worlds =================
     @PluginMethod fun worldList(call: PluginCall) {
-        val active = props(nm(call)).readLines().firstOrNull { it.startsWith("level-name=") }?.substringAfter("=") ?: "world"
-        val a = JSONArray(); File(root, nm(call)).listFiles()?.filter { File(it, "level.dat").exists() }
-            ?.forEach { a.put(JSONObject().put("name", it.name).put("active", it.name == active)) }
+        val f = props(nm(call))
+        val active = (if (f.exists()) f.readLines().firstOrNull { it.startsWith("level-name=") }?.substringAfter("=")?.trim() else null) ?: "world"
+        val a = JSONArray()
+        File(root, nm(call)).listFiles()?.sortedBy { it.name.lowercase() }?.forEach { d ->
+            if (!d.isDirectory) return@forEach
+            val kind = when {
+                File(d, "level.dat").exists() || File(d, "region").exists() -> "world"
+                File(d, "DIM-1").exists() -> "nether"
+                File(d, "DIM1").exists() -> "end"
+                else -> null
+            }
+            if (kind != null) a.put(JSONObject().put("name", d.name).put("active", d.name == active).put("kind", kind).put("modified", d.lastModified()))
+        }
         call.resolve(JSObject().put("worlds", a)) }
     @PluginMethod fun worldSetActive(call: PluginCall) {
         val f = props(nm(call)); val w = call.getString("world")!!
