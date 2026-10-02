@@ -32,6 +32,8 @@ class DeepPixelPlugin : Plugin() {
         val j = jre.path
         pb.environment()["LD_LIBRARY_PATH"] = listOf("lib/jli", "lib/server", "lib", "lib/aarch64/jli", "lib/aarch64/server", "lib/aarch64").joinToString(":") { "$j/$it" }
         pb.environment()["JAVA_HOME"] = j
+        val shim = File(context.applicationInfo.nativeLibraryDir, "libtagfix.so")   // turns off Android heap pointer tagging
+        if (shim.exists()) pb.environment()["LD_PRELOAD"] = shim.path
         return pb
     }
 

@@ -18,7 +18,7 @@ const patch = (file, fn) => {
 // Phone-friendly: if files were uploaded flat (no folders), put them where the project expects them.
 const mv = (f, d) => { const s = path.join(root, f); if (fs.existsSync(s)) { fs.mkdirSync(path.join(root, d), { recursive: true }); fs.renameSync(s, path.join(root, d, f)); } };
 ['index.html', 'logo.png'].forEach(f => mv(f, 'www'));
-['DeepPixelPlugin.kt', 'ServerService.kt'].forEach(f => mv(f, 'native'));
+['DeepPixelPlugin.kt', 'ServerService.kt', 'tagfix.c'].forEach(f => mv(f, 'native'));
 ['icon-only.png', 'icon-foreground.png', 'icon-background.png', 'splash.png', 'splash-dark.png'].forEach(f => mv(f, 'assets'));
 
 run('npm install');
@@ -46,6 +46,32 @@ public class MainActivity extends BridgeActivity {
 const b64 = path.join(root, 'deeppixel.keystore.b64');
 if (fs.existsSync(b64)) fs.writeFileSync(path.join(root, 'deeppixel.keystore'), Buffer.from(fs.readFileSync(b64, 'utf8').replace(/\s+/g, ''), 'base64'));
 
+// Native shim (native/tagfix.c): switches off Android's heap pointer tagging inside the Java process
+function findClang() {
+  const homes = [process.env.ANDROID_NDK_HOME, process.env.ANDROID_NDK_ROOT, process.env.ANDROID_NDK_LATEST_HOME];
+  const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+  if (sdk && fs.existsSync(path.join(sdk, 'ndk')))
+    fs.readdirSync(path.join(sdk, 'ndk')).sort().reverse().forEach(d => homes.push(path.join(sdk, 'ndk', d)));
+  for (const h of homes.filter(Boolean)) {
+    const pre = path.join(h, 'toolchains/llvm/prebuilt');
+    if (!fs.existsSync(pre)) continue;
+    for (const host of fs.readdirSync(pre)) {
+      const c = path.join(pre, host, 'bin', 'aarch64-linux-android26-clang' + (win ? '.cmd' : ''));
+      if (fs.existsSync(c)) return c;
+    }
+  }
+  return null;
+}
+const clang = findClang();
+if (clang) {
+  const out = path.join(droid, 'app/src/main/jniLibs/arm64-v8a');
+  fs.mkdirSync(out, { recursive: true });
+  run(`"${clang}" -shared -fPIC -O2 -Wl,-z,max-page-size=16384 -o "${path.join(out, 'libtagfix.so')}" "${path.join(root, 'native/tagfix.c')}"`);
+} else {
+  console.error('\nERROR: Android NDK not found, so the Java crash fix cannot be built. Install the NDK (Android Studio > SDK Manager > SDK Tools > NDK) or set ANDROID_NDK_HOME.');
+  if (process.env.CI) process.exit(1);
+}
+
 // Manifest: permissions, foreground service, and switch off Android's pointer tagging (it crashes Java)
 patch(path.join(droid, 'app/src/main/AndroidManifest.xml'), s => {
   if (!s.includes('ServerService')) {
@@ -67,6 +93,8 @@ patch(path.join(droid, 'app/build.gradle'), s => {
   if (!s.includes('kotlin-android'))
     s = s.replace("apply plugin: 'com.android.application'", "apply plugin: 'com.android.application'\napply plugin: 'kotlin-android'")
          .replace(/android\s*\{/, "android {\n    kotlinOptions { jvmTarget = '17' }");
+  if (!s.includes('useLegacyPackaging'))
+    s = s.replace(/android\s*\{/, 'android {\n    packaging { jniLibs { useLegacyPackaging = true } }');
   // Same signing key every build, so updates install over the old app (keeps your servers and Java)
   if (!s.includes('deeppixel.keystore') && fs.existsSync(path.join(root, 'deeppixel.keystore')))
     s = s.replace(/android\s*\{/, 'android {\n    signingConfigs { debug { storeFile file("../../deeppixel.keystore"); storePassword "deeppixel"; keyAlias "deeppixel"; keyPassword "deeppixel" } }');
