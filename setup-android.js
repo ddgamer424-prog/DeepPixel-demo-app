@@ -46,13 +46,18 @@ public class MainActivity extends BridgeActivity {
 const b64 = path.join(root, 'deeppixel.keystore.b64');
 if (fs.existsSync(b64)) fs.writeFileSync(path.join(root, 'deeppixel.keystore'), Buffer.from(fs.readFileSync(b64, 'utf8').replace(/\s+/g, ''), 'base64'));
 
-// Manifest: permissions + foreground service
+// Manifest: permissions, foreground service, and switch off Android's pointer tagging (it crashes Java)
 patch(path.join(droid, 'app/src/main/AndroidManifest.xml'), s => {
-  if (s.includes('ServerService')) return s;
-  const perms = ['FOREGROUND_SERVICE', 'WAKE_LOCK', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'POST_NOTIFICATIONS']
-    .map(p => `    <uses-permission android:name="android.permission.${p}" />`).join('\n');
-  return s.replace('</application>', '    <service android:name=".ServerService" android:exported="false" />\n    </application>')
-          .replace('</manifest>', perms + '\n</manifest>');
+  if (!s.includes('ServerService')) {
+    const perms = ['FOREGROUND_SERVICE', 'WAKE_LOCK', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'POST_NOTIFICATIONS',
+                   'MANAGE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE', 'WRITE_EXTERNAL_STORAGE']
+      .map(p => `    <uses-permission android:name="android.permission.${p}" />`).join('\n');
+    s = s.replace('</application>', '    <service android:name=".ServerService" android:exported="false" />\n    </application>')
+         .replace('</manifest>', perms + '\n</manifest>');
+  }
+  if (!s.includes('allowNativeHeapPointerTagging'))
+    s = s.replace('<application', '<application android:allowNativeHeapPointerTagging="false" android:memtagMode="off" android:requestLegacyExternalStorage="true"');
+  return s;
 });
 
 // Kotlin support (the plugin is written in Kotlin)

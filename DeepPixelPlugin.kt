@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
 class DeepPixelPlugin : Plugin() {
 
     // !! Must be an ARM64 JRE 21 built for Android (bionic libc). A normal Linux/glibc JRE will NOT run. See README.
-    private val JRE_URL = "https://YOUR-HOST/jre21-android-aarch64.tar.gz"
+    private val JRE_URL = "https://github.com/ddgamer424-prog/DeepPixel-demo-app/releases/download/java21/jre.tar.gz"
 
     private val urlFile get() = File(context.filesDir, "jre_url.txt")
     private fun jreUrl() = (if (urlFile.exists()) urlFile.readText().trim() else "").ifEmpty { JRE_URL }
@@ -71,6 +71,7 @@ class DeepPixelPlugin : Plugin() {
         if (!Regex("\\w+").matches(name)) return call.reject("Invalid name")
         thread {
             try {
+                require(!File(File(root, name), "meta.json").exists()) { "A server named $name already exists" }
                 if (!java().exists()) {
                     val tgz = File(context.cacheDir, "jre.tgz"); val url = jreUrl(); require(url.startsWith("http") && !url.contains("YOUR-HOST")) { "Set the Java runtime link first (Create tab)" }
                     download(url, tgz, 0, 45, "Downloading Java")
@@ -84,7 +85,14 @@ class DeepPixelPlugin : Plugin() {
                     val vout = v.inputStream.bufferedReader().readText(); v.waitFor()
                     if (!vout.contains("version")) { jre.deleteRecursively(); throw IllegalStateException("Java does not run on this phone: ${vout.take(300)}") }
                 }
-                val dir = File(root, name).apply { mkdirs() }
+                val loc = call.getString("location") ?: ""
+                val link = File(root, name)
+                val dir = if (loc.isNotEmpty()) {   // server files live in a normal phone folder; the app links to it
+                    val target = File(loc, name).apply { mkdirs() }
+                    require(target.isDirectory && target.canWrite()) { "Can't write to $loc. Allow storage access first." }
+                    if (java.nio.file.Files.isSymbolicLink(link.toPath())) java.nio.file.Files.delete(link.toPath()) else link.deleteRecursively()
+                    java.nio.file.Files.createSymbolicLink(link.toPath(), target.toPath()); link
+                } else link.apply { mkdirs() }
                 paperDownload(ver, File(dir, "paper.jar"), 50, 100)
                 File(dir, "eula.txt").writeText("eula=true\n")   // the user accepts Mojang's EULA in the UI before this
                 File(dir, "server.properties").writeText("motd=$name\nmax-players=10\nview-distance=6\nserver-port=${25565 + (root.listFiles()?.count { File(it, "meta.json").exists() } ?: 0)}\n")
@@ -97,7 +105,7 @@ class DeepPixelPlugin : Plugin() {
     @PluginMethod fun listServers(call: PluginCall) {
         val arr = JSONArray()
         root.listFiles()?.forEach { d -> File(d, "meta.json").takeIf { it.exists() }?.let {
-            arr.put(JSONObject(it.readText()).put("state", if (procs[d.name]?.isAlive == true) "running" else "stopped")) } }
+            arr.put(JSONObject(it.readText()).put("dir", d.canonicalPath).put("state", if (procs[d.name]?.isAlive == true) "running" else "stopped")) } }
         call.resolve(JSObject().put("servers", arr))
     }
 
@@ -134,7 +142,34 @@ class DeepPixelPlugin : Plugin() {
     @PluginMethod fun saveProps(call: PluginCall) {
         File(root, call.getString("name")!! + "/server.properties").writeText(call.getString("text")!!); call.resolve() }
     @PluginMethod fun deleteServer(call: PluginCall) {
-        val n = call.getString("name")!!; procs.remove(n)?.destroy(); File(root, n).deleteRecursively(); call.resolve() }
+        val n = call.getString("name")!!; procs.remove(n)?.destroy(); val f = File(root, n)
+        if (java.nio.file.Files.isSymbolicLink(f.toPath())) { f.canonicalFile.deleteRecursively(); java.nio.file.Files.deleteIfExists(f.toPath()) } else f.deleteRecursively()
+        call.resolve() }
+
+    // ================= phone storage =================
+    private fun hasStorage(): Boolean =
+        if (android.os.Build.VERSION.SDK_INT >= 30) android.os.Environment.isExternalStorageManager()
+        else context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    @PluginMethod fun getStorageAccess(call: PluginCall) = call.resolve(JSObject().put("granted", hasStorage())
+        .put("defaultDir", android.os.Environment.getExternalStorageDirectory().path + "/DeepPixel"))
+    @PluginMethod fun requestStorageAccess(call: PluginCall) {
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            val i = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                android.net.Uri.parse("package:" + context.packageName)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            try { context.startActivity(i) } catch (e: Exception) {
+                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        } else activity.requestPermissions(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE, android.Manifest.permission.READ_EXTERNAL_STORAGE), 1)
+        call.resolve() }
+    @PluginMethod fun browseDirs(call: PluginCall) {
+        try {
+            val base = android.os.Environment.getExternalStorageDirectory().canonicalFile
+            var f = File(call.getString("path").let { if (it.isNullOrEmpty()) base.path else it }).canonicalFile
+            while (!f.isDirectory && f.parentFile != null) f = f.parentFile!!
+            require(f.path.startsWith(base.path)) { "Pick a folder inside your phone storage" }
+            val a = JSONArray(); f.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }?.sortedBy { it.name.lowercase() }?.forEach { a.put(it.name) }
+            call.resolve(JSObject().put("path", f.path).put("parent", if (f.path == base.path) "" else (f.parent ?: "")).put("dirs", a))
+        } catch (e: Throwable) { call.reject(e.message ?: e.toString()) } }
+    @PluginMethod fun makeDir(call: PluginCall) { File(call.getString("path")!!).mkdirs(); call.resolve() }
 
     // ================= helpers =================
     private val players = HashMap<String, MutableSet<String>>()
