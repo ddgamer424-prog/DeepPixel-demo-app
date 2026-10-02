@@ -18,7 +18,7 @@ const patch = (file, fn) => {
 // Phone-friendly: if files were uploaded flat (no folders), put them where the project expects them.
 const mv = (f, d) => { const s = path.join(root, f); if (fs.existsSync(s)) { fs.mkdirSync(path.join(root, d), { recursive: true }); fs.renameSync(s, path.join(root, d, f)); } };
 ['index.html', 'logo.png'].forEach(f => mv(f, 'www'));
-['DeepPixelPlugin.kt', 'ServerService.kt', 'tagfix.c'].forEach(f => mv(f, 'native'));
+['DeepPixelPlugin.kt', 'ServerService.kt', 'tagfix.c', 'Launcher.java'].forEach(f => mv(f, 'native'));
 ['icon-only.png', 'icon-foreground.png', 'icon-background.png', 'splash.png', 'splash-dark.png'].forEach(f => mv(f, 'assets'));
 
 run('npm install');
@@ -45,6 +45,14 @@ public class MainActivity extends BridgeActivity {
 // Signing key: shipped as text (.b64) so uploads can't corrupt it; decoded here for every build
 const b64 = path.join(root, 'deeppixel.keystore.b64');
 if (fs.existsSync(b64)) fs.writeFileSync(path.join(root, 'deeppixel.keystore'), Buffer.from(fs.readFileSync(b64, 'utf8').replace(/\s+/g, ''), 'base64'));
+
+// Launcher jar (native/Launcher.java): lets Paper start on the phone's Java build
+{
+  const tmp = path.join(droid, 'launcher-build'), assets = path.join(droid, 'app/src/main/assets');
+  fs.mkdirSync(tmp, { recursive: true }); fs.mkdirSync(assets, { recursive: true });
+  run(`javac --release 17 -d "${tmp}" "${path.join(root, 'native/Launcher.java')}"`);
+  run(`jar cf "${path.join(assets, 'deeppixel-launcher.jar')}" -C "${tmp}" .`);
+}
 
 // Native shim (native/tagfix.c): switches off Android's heap pointer tagging inside the Java process
 function findClang() {

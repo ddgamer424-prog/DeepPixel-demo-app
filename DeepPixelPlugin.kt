@@ -117,8 +117,11 @@ class DeepPixelPlugin : Plugin() {
         val args = mutableListOf(java().path, "-Xmx${ram}M", "-Xms${ram / 2}M")
         if (m.optInt("cores", 0) > 0) args.add("-XX:ActiveProcessorCount=${m.getInt("cores")}")
         if (m.optBoolean("optimize", true)) args.addAll(listOf("-XX:+UseSerialGC", "-XX:+DisableExplicitGC"))
+        val launcher = File(context.filesDir, "deeppixel-launcher.jar")   // small launcher that reports a normal Java version to Paper
+        context.assets.open("deeppixel-launcher.jar").use { i -> launcher.outputStream().use { o -> i.copyTo(o) } }
         File(dir, "tmp").mkdirs()
-        args.addAll(listOf("-Djava.io.tmpdir=${File(dir, "tmp").path}", "-Duser.home=${dir.path}", "-Djava.net.preferIPv4Stack=true", "-jar", "paper.jar", "nogui"))
+        args.addAll(listOf("-Djava.io.tmpdir=${File(dir, "tmp").path}", "-Duser.home=${dir.path}", "-Djava.net.preferIPv4Stack=true",
+            "--add-opens", "java.base/java.lang=ALL-UNNAMED", "-DPaper.IgnoreJavaVersion=true", "-cp", "${launcher.path}:paper.jar", "com.deeppixel.Launcher", "nogui"))
         val p = javaEnv(ProcessBuilder(args)).directory(dir).redirectErrorStream(true).start()
         ServerService.start(context)
         procs[name] = p; emit("state", JSONObject().put("name", name).put("state", "running"))
