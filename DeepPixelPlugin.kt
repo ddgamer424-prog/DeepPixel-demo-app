@@ -172,7 +172,7 @@ class DeepPixelPlugin : Plugin() {
         if (sw == "paper" && jv >= 17) {   // small launcher that reports a normal Java version to Paper
             val launcher = File(context.filesDir, "deeppixel-launcher.jar")
             context.assets.open("deeppixel-launcher.jar").use { i -> launcher.outputStream().use { o -> i.copyTo(o) } }
-            args.addAll(listOf("--add-opens", "java.base/java.lang=ALL-UNNAMED", "-DPaper.IgnoreJavaVersion=true", "-cp", "${launcher.path}:paper.jar", "com.deeppixel.Launcher", "nogui"))
+            args.addAll(listOf("--add-opens", "java.base/java.lang=ALL-UNNAMED", "-DPaper.IgnoreJavaVersion=true", "-cp", launcher.path, "com.deeppixel.Launcher", File(dir, "paper.jar").path, "nogui"))
         } else args.addAll(listOf("-jar", if (sw == "vanilla") "server.jar" else "paper.jar", "nogui"))
         say("Starting Minecraft $mc with Java $jv")
         val p = javaEnv(ProcessBuilder(args), jv).directory(dir).redirectErrorStream(true).start()
