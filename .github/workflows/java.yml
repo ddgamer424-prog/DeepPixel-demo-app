@@ -8,15 +8,5 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - run: |
-          gh release download jre22-6.0.0 --repo QuestCraftPlusPlus/android-openjdk-build-multiarch --pattern 'JRE-21.zip' --dir dl
-          mkdir x
-          unzip -oq dl/JRE-21.zip -d x
-          j=$(find x -type f -path '*/bin/java' | head -1)
-          test -n "$j" || { echo "bin/java not found"; find x | head -80; exit 1; }
-          r=$(dirname "$(dirname "$j")")
-          chmod +x "$r"/bin/*
-          mkdir pkg && cp -a "$r" pkg/jre
-          tar -czf jre.tar.gz -C pkg jre
-          gh release delete java21 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create java21 jre.tar.gz --repo "$GITHUB_REPOSITORY" --title "Java 21 for Android" --notes "Java 21 runtime for DeepPixel"
+      - uses: actions/checkout@v4
+      - run: python3 prepare_java.py
