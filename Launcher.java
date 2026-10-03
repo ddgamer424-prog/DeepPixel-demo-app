@@ -2,16 +2,20 @@
 package com.deeppixel;
 
 import java.lang.reflect.InvocationTargetException;
+import java.util.stream.Collectors;
 
 /**
  * Starts Paper after making this Java report a normal release version.
- * The Java build used on phones calls itself "21.0.3-internal", and Paper refuses to start on such builds.
+ * Java builds made for phones call themselves e.g. "21.0.3-internal", and Paper refuses to start on such builds.
+ * The real version numbers are kept (Java 17, 21, 25...), only the pre-release tag is removed.
  */
 public final class Launcher {
     public static void main(String[] args) throws Throwable {
         try {
-            String v = "21.0.3+9-LTS";
-            System.setProperty("java.version", "21.0.3");
+            Runtime.Version real = Runtime.version();
+            String nums = real.version().stream().map(String::valueOf).collect(Collectors.joining("."));
+            String v = nums + "+" + real.build().orElse(1);
+            System.setProperty("java.version", nums);
             System.setProperty("java.runtime.version", v);
             java.lang.reflect.Field f = Runtime.class.getDeclaredField("version");
             f.setAccessible(true);

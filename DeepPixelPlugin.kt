@@ -26,15 +26,45 @@ class DeepPixelPlugin : Plugin() {
 
     private val procs = HashMap<String, Process>()
     private val root get() = File(context.filesDir, "servers").apply { mkdirs() }
-    private val jre get() = File(context.filesDir, "jre")
-    private fun java() = File(jre, "bin/java")
-    private fun javaEnv(pb: ProcessBuilder): ProcessBuilder {   // Android doesn't follow the Java folder layout on its own
-        val j = jre.path
+    // ---- Java runtimes: 8, 17, 21 and 25 live side by side; the right one is picked per Minecraft version ----
+    private val JRE_BASE = "https://github.com/ddgamer424-prog/DeepPixel-demo-app/releases/download/java-runtimes"
+    private fun jreDir(v: Int): File { val old = File(context.filesDir, "jre"); return if (v == 21 && File(old, "bin/java").exists()) old else File(context.filesDir, "jre$v") }
+    private fun javaBin(v: Int) = File(jreDir(v), "bin/java")
+    private fun requiredJava(mc: String): Int {
+        val p = mc.split('.', '-').map { it.toIntOrNull() ?: 0 }
+        val a = p.getOrElse(0) { 1 }; val b = p.getOrElse(1) { 0 }; val c = p.getOrElse(2) { 0 }
+        return when { a >= 26 -> 25; a != 1 -> 21; b >= 21 -> 21; b == 20 && c >= 5 -> 21; b >= 17 -> 17; else -> 8 }
+    }
+    private fun javaFor(mc: String, pref: Int) = if (pref > 0) pref else requiredJava(mc)
+    private fun javaEnv(pb: ProcessBuilder, v: Int): ProcessBuilder {   // Android doesn't follow the Java folder layout on its own
+        val j = jreDir(v).path
         pb.environment()["LD_LIBRARY_PATH"] = listOf("lib/jli", "lib/server", "lib", "lib/aarch64/jli", "lib/aarch64/server", "lib/aarch64").joinToString(":") { "$j/$it" }
         pb.environment()["JAVA_HOME"] = j
         val shim = File(context.applicationInfo.nativeLibraryDir, "libtagfix.so")   // turns off Android heap pointer tagging
         if (shim.exists()) pb.environment()["LD_PRELOAD"] = shim.path
         return pb
+    }
+    private fun installJava(v: Int, from: Int, to: Int) {
+        if (javaBin(v).exists()) return
+        val dir = jreDir(v); val tgz = File(context.cacheDir, "jre$v.tgz")
+        download("$JRE_BASE/jre$v.tar.gz", tgz, from, from + (to - from) * 85 / 100, "Downloading Java $v")
+        progress(to - 3, "Unpacking Java $v…"); dir.deleteRecursively(); dir.mkdirs()
+        val t = ProcessBuilder("tar", "xzf", tgz.path, "-C", dir.path, "--strip-components=1").redirectErrorStream(true).start()
+        val tout = t.inputStream.bufferedReader().readText(); t.waitFor(); tgz.delete()
+        require(javaBin(v).exists()) { "Java $v unpack failed: ${tout.take(300)}" }
+        File(dir, "bin").listFiles()?.forEach { it.setExecutable(true) }
+        progress(to - 1, "Checking Java $v…")
+        val c = javaEnv(ProcessBuilder(javaBin(v).path, "-version"), v).redirectErrorStream(true).start()
+        val out = c.inputStream.bufferedReader().readText(); c.waitFor()
+        if (!out.contains("version")) { dir.deleteRecursively(); throw IllegalStateException("Java $v does not run on this phone: ${out.take(300)}") }
+    }
+    /** Installs the wanted Java if needed; if that one can't be downloaded, falls back to the next newer one. */
+    private fun ensureJava(want: Int, from: Int, to: Int): Int {
+        var last: Throwable? = null
+        for (v in listOf(8, 17, 21, 25).filter { it >= want }) {
+            try { installJava(v, from, to); return v } catch (e: Throwable) { last = e; if (!javaBin(v).exists()) jreDir(v).deleteRecursively() }
+        }
+        throw IllegalStateException("Could not get Java $want: ${last?.message}")
     }
 
     private fun emit(ev: String, o: JSONObject) = notifyListeners(ev, JSObject(o.toString()))
@@ -68,25 +98,36 @@ class DeepPixelPlugin : Plugin() {
         download(url, out, from, to, "Downloading Paper $ver")
     }
 
+    private val MOJANG = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+    private fun vanillaDownload(ver: String, out: File, from: Int, to: Int) {
+        val vs = JSONObject(get(MOJANG)).getJSONArray("versions")
+        var pkg: String? = null
+        for (i in 0 until vs.length()) { val v = vs.getJSONObject(i); if (v.getString("id") == ver) { pkg = v.getString("url"); break } }
+        require(pkg != null) { "Minecraft $ver was not found" }
+        val dl = JSONObject(get(pkg)).optJSONObject("downloads")?.optJSONObject("server")
+        require(dl != null) { "Minecraft $ver has no server download" }
+        download(dl.getString("url"), out, from, to, "Downloading Minecraft $ver")
+    }
+    private fun serverJar(software: String, ver: String, dir: File, from: Int, to: Int) {
+        if (software == "vanilla") vanillaDownload(ver, File(dir, "server.jar"), from, to) else paperDownload(ver, File(dir, "paper.jar"), from, to)
+    }
+    /** Version list for the chosen server software. Vanilla has every release (and snapshots if asked); Paper has what PaperMC builds. */
+    @PluginMethod fun mcVersions(call: PluginCall) = bg(call) {
+        if ((call.getString("software") ?: "paper") == "vanilla") {
+            val snaps = call.getBoolean("snapshots") == true
+            val vs = JSONObject(get(MOJANG)).getJSONArray("versions"); val a = JSONArray()
+            for (i in 0 until vs.length()) { val v = vs.getJSONObject(i); val t = v.getString("type"); if (t == "release" || (snaps && t == "snapshot")) a.put(v.getString("id")) }
+            call.resolve(JSObject().put("versions", a))
+        } else paperVersions(call)
+    }
+
     @PluginMethod fun createServer(call: PluginCall) {
-        val name = call.getString("name")!!; val ver = call.getString("version")!!; val ram = call.getInt("ramMb") ?: 1024
+        val name = call.getString("name")!!; val ver = call.getString("version")!!; val ram = call.getInt("ramMb") ?: 1024; val sw = call.getString("software") ?: "paper"
         if (!Regex("\\w+").matches(name)) return call.reject("Invalid name")
         thread {
             try {
                 require(!File(File(root, name), "meta.json").exists()) { "A server named $name already exists" }
-                if (!java().exists()) {
-                    val tgz = File(context.cacheDir, "jre.tgz"); val url = jreUrl(); require(url.startsWith("http") && !url.contains("YOUR-HOST")) { "Set the Java runtime link first (Create tab)" }
-                    download(url, tgz, 0, 45, "Downloading Java")
-                    progress(46, "Unpacking Java…"); jre.deleteRecursively(); jre.mkdirs()
-                    val t = ProcessBuilder("tar", "xzf", tgz.path, "-C", jre.path, "--strip-components=1").redirectErrorStream(true).start()
-                    val tout = t.inputStream.bufferedReader().readText(); t.waitFor(); tgz.delete()
-                    require(java().exists()) { "Java unpack failed: ${tout.take(300)}" }
-                    File(jre, "bin").listFiles()?.forEach { it.setExecutable(true) }
-                    progress(48, "Checking Java…")
-                    val v = javaEnv(ProcessBuilder(java().path, "-version")).redirectErrorStream(true).start()
-                    val vout = v.inputStream.bufferedReader().readText(); v.waitFor()
-                    if (!vout.contains("version")) { jre.deleteRecursively(); throw IllegalStateException("Java does not run on this phone: ${vout.take(300)}") }
-                }
+                ensureJava(requiredJava(ver), 0, 45)
                 val loc = call.getString("location") ?: ""
                 val link = File(root, name)
                 val dir = if (loc.isNotEmpty()) {   // server files live in a normal phone folder; the app links to it
@@ -95,10 +136,10 @@ class DeepPixelPlugin : Plugin() {
                     if (java.nio.file.Files.isSymbolicLink(link.toPath())) java.nio.file.Files.delete(link.toPath()) else link.deleteRecursively()
                     java.nio.file.Files.createSymbolicLink(link.toPath(), target.toPath()); link
                 } else link.apply { mkdirs() }
-                paperDownload(ver, File(dir, "paper.jar"), 50, 100)
+                serverJar(sw, ver, dir, 50, 100)
                 File(dir, "eula.txt").writeText("eula=true\n")   // the user accepts Mojang's EULA in the UI before this
                 File(dir, "server.properties").writeText("motd=$name\nmax-players=10\nview-distance=6\nserver-port=${25565 + (root.listFiles()?.count { File(it, "meta.json").exists() } ?: 0)}\n")
-                File(dir, "meta.json").writeText(JSONObject().put("name", name).put("version", ver).put("ramMb", ram).toString())
+                File(dir, "meta.json").writeText(JSONObject().put("name", name).put("version", ver).put("software", sw).put("ramMb", ram).toString())
                 call.resolve()
             } catch (e: Throwable) { call.reject(e.message ?: e.toString()) }
         }
@@ -111,24 +152,36 @@ class DeepPixelPlugin : Plugin() {
         call.resolve(JSObject().put("servers", arr))
     }
 
-    @PluginMethod fun start(call: PluginCall) {
+    @PluginMethod fun start(call: PluginCall) = bg(call) {
         val name = call.getString("name")!!; val dir = File(root, name)
+        require(procs[name]?.isAlive != true) { "Server is already running" }
         val m = JSONObject(File(dir, "meta.json").readText()); val ram = m.getInt("ramMb")
-        val args = mutableListOf(java().path, "-Xmx${ram}M", "-Xms${ram / 2}M")
+        val mc = m.optString("version", "1.21.4"); val sw = m.optString("software", "paper"); val want = javaFor(mc, m.optInt("java", 0))
+        fun say(t: String) = emit("console", JSONObject().put("name", name).put("line", "[DeepPixel] $t"))
+        var jv = want
+        try {
+            if (!javaBin(want).exists()) { emit("state", JSONObject().put("name", name).put("state", "starting")); say("Installing Java $want (first time only)…") }
+            jv = ensureJava(want, 0, 100)
+            if (jv != want) say("Java $want was not available, using Java $jv instead.")
+        } catch (e: Throwable) { say("Could not start: ${e.message}"); emit("state", JSONObject().put("name", name).put("state", "stopped")); throw e }
+        val args = mutableListOf(javaBin(jv).path, "-Xmx${ram}M", "-Xms${ram / 2}M")
         if (m.optInt("cores", 0) > 0) args.add("-XX:ActiveProcessorCount=${m.getInt("cores")}")
         if (m.optBoolean("optimize", true)) args.addAll(listOf("-XX:+UseSerialGC", "-XX:+DisableExplicitGC"))
-        val launcher = File(context.filesDir, "deeppixel-launcher.jar")   // small launcher that reports a normal Java version to Paper
-        context.assets.open("deeppixel-launcher.jar").use { i -> launcher.outputStream().use { o -> i.copyTo(o) } }
         File(dir, "tmp").mkdirs()
-        args.addAll(listOf("-Djava.io.tmpdir=${File(dir, "tmp").path}", "-Duser.home=${dir.path}", "-Djava.net.preferIPv4Stack=true",
-            "--add-opens", "java.base/java.lang=ALL-UNNAMED", "-DPaper.IgnoreJavaVersion=true", "-cp", "${launcher.path}:paper.jar", "com.deeppixel.Launcher", "nogui"))
-        val p = javaEnv(ProcessBuilder(args)).directory(dir).redirectErrorStream(true).start()
+        args.addAll(listOf("-Djava.io.tmpdir=${File(dir, "tmp").path}", "-Duser.home=${dir.path}", "-Djava.net.preferIPv4Stack=true"))
+        if (sw == "paper" && jv >= 17) {   // small launcher that reports a normal Java version to Paper
+            val launcher = File(context.filesDir, "deeppixel-launcher.jar")
+            context.assets.open("deeppixel-launcher.jar").use { i -> launcher.outputStream().use { o -> i.copyTo(o) } }
+            args.addAll(listOf("--add-opens", "java.base/java.lang=ALL-UNNAMED", "-DPaper.IgnoreJavaVersion=true", "-cp", "${launcher.path}:paper.jar", "com.deeppixel.Launcher", "nogui"))
+        } else args.addAll(listOf("-jar", if (sw == "vanilla") "server.jar" else "paper.jar", "nogui"))
+        say("Starting Minecraft $mc with Java $jv")
+        val p = javaEnv(ProcessBuilder(args), jv).directory(dir).redirectErrorStream(true).start()
         ServerService.start(context)
         procs[name] = p; emit("state", JSONObject().put("name", name).put("state", "running"))
         thread { p.inputStream.bufferedReader().forEachLine { trackPlayers(name, it); emit("console", JSONObject().put("name", name).put("line", it)) }
             val code = try { p.waitFor() } catch (e: Exception) { -1 }
             val why = when (code) { 0 -> "stopped normally"; 137 -> "was killed by Android (memory or battery limit)"; 134, 135, 139 -> "crashed (Java native error)"; else -> "ended unexpectedly" }
-            emit("console", JSONObject().put("name", name).put("line", "[DeepPixel] Server $why (exit code $code)"))
+            say("Server $why (exit code $code)")
             players.remove(name); emit("state", JSONObject().put("name", name).put("state", "stopped"))
             if (procs.values.none { it.isAlive }) ServerService.stop(context) }
         call.resolve()
@@ -200,12 +253,20 @@ class DeepPixelPlugin : Plugin() {
     private fun pid(p: Process): Int = try { (Process::class.java.getMethod("pid").invoke(p) as Long).toInt() }
         catch (e: Exception) { p.javaClass.getDeclaredField("pid").apply { isAccessible = true }.getInt(p) }
     private fun props(n: String) = File(root, "$n/server.properties")
-    private fun bdir(n: String) = File(context.filesDir, "backups/$n").apply { mkdirs() }
+    private fun bdir(n: String): File {
+        val real = File(root, n).canonicalFile
+        val d = if (real.path.startsWith(context.filesDir.canonicalPath)) File(context.filesDir, "backups/$n") else File(real.parentFile, "_backups/$n")
+        return d.apply { mkdirs() }
+    }
+    @PluginMethod fun getBackupPath(call: PluginCall) = call.resolve(JSObject().put("path", bdir(nm(call)).path))
 
     // ================= plugin manager (Modrinth) =================
     @PluginMethod fun pluginSearch(call: PluginCall) = bg(call) {
-        val f = enc("[[\"categories:paper\"],[\"versions:${call.getString("version")}\"],[\"project_type:mod\"]]")
-        val hits = JSONObject(get("https://api.modrinth.com/v2/search?limit=20&query=${enc(call.getString("query") ?: "")}&facets=$f")).getJSONArray("hits")
+        val cat = call.getString("category") ?: ""; val q = call.getString("query") ?: ""
+        val facets = StringBuilder("[[\"categories:paper\"],[\"versions:${call.getString("version")}\"],[\"project_type:mod\"]")
+        if (cat.isNotEmpty()) facets.append(",[\"categories:$cat\"]"); facets.append("]")
+        val idx = if (q.isEmpty()) "downloads" else "relevance"
+        val hits = JSONObject(get("https://api.modrinth.com/v2/search?limit=20&offset=${call.getInt("offset") ?: 0}&index=$idx&query=${enc(q)}&facets=${enc(facets.toString())}")).getJSONArray("hits")
         call.resolve(JSObject().put("hits", hits)) }
     @PluginMethod fun pluginInstall(call: PluginCall) = bg(call) {
         val v = JSONArray(get("https://api.modrinth.com/v2/project/${call.getString("id")}/version?loaders=${enc("[\"paper\"]")}&game_versions=${enc("[\"${call.getString("version")}\"]")}"))
@@ -230,6 +291,15 @@ class DeepPixelPlugin : Plugin() {
     @PluginMethod fun fmRead(call: PluginCall) {
         val f = safe(nm(call), call.getString("path")!!); require(f.length() < 512_000) { "File is too large to edit here" }
         call.resolve(JSObject().put("text", f.readText())) }
+    @PluginMethod fun fmTail(call: PluginCall) {
+        val f = safe(nm(call), call.getString("path")!!)
+        if (!f.exists()) { call.resolve(JSObject().put("text", "")); return }
+        val n = (call.getInt("bytes") ?: 60000).toLong()
+        java.io.RandomAccessFile(f, "r").use { r ->
+            val start = maxOf(0L, r.length() - n); r.seek(start)
+            val b = ByteArray((r.length() - start).toInt()); r.readFully(b)
+            var t = String(b, Charsets.UTF_8); if (start > 0) t = t.substringAfter('\n', t)
+            call.resolve(JSObject().put("text", t)) } }
     @PluginMethod fun fmWrite(call: PluginCall) { safe(nm(call), call.getString("path")!!).writeText(call.getString("text")!!); call.resolve() }
     @PluginMethod fun fmDelete(call: PluginCall) { safe(nm(call), call.getString("path")!!).deleteRecursively(); call.resolve() }
     @PluginMethod fun fmRename(call: PluginCall) { val f = safe(nm(call), call.getString("path")!!); f.renameTo(File(f.parentFile, call.getString("to")!!)); call.resolve() }
@@ -281,19 +351,44 @@ class DeepPixelPlugin : Plugin() {
     @PluginMethod fun backupDelete(call: PluginCall) { File(bdir(nm(call)), call.getString("file")!!).delete(); call.resolve() }
 
     // ================= live stats, settings, version, players =================
+    private val cpuLast = HashMap<String, Pair<Long, Long>>()
     @PluginMethod fun getStats(call: PluginCall) {
-        val p = procs[nm(call)]; fun kb(f: String, k: String) = Regex("\\d+").find(File(f).readLines().first { it.startsWith(k) })!!.value.toLong() / 1024
-        call.resolve(JSObject().put("usedMb", if (p?.isAlive == true) kb("/proc/${pid(p)}/status", "VmRSS") else 0)
-            .put("availMb", kb("/proc/meminfo", "MemAvailable")).put("cores", Runtime.getRuntime().availableProcessors())) }
+        val n = nm(call); val p = procs[n]; fun kb(f: String, k: String) = Regex("\\d+").find(File(f).readLines().first { it.startsWith(k) })!!.value.toLong() / 1024
+        val cores = Runtime.getRuntime().availableProcessors(); var cpu = 0.0
+        if (p?.isAlive == true) {
+            val f = File("/proc/${pid(p)}/stat").readText().substringAfterLast(')').trim().split(' ')
+            val ticks = f[11].toLong() + f[12].toLong(); val now = System.currentTimeMillis(); val prev = cpuLast[n]
+            if (prev != null && now > prev.second) cpu = (ticks - prev.first) * 10.0 / (now - prev.second) * 100.0 / cores
+            cpuLast[n] = ticks to now
+        } else cpuLast.remove(n)
+        val maxMb = try { JSONObject(File(root, "$n/meta.json").readText()).optInt("ramMb", 1024) } catch (e: Exception) { 1024 }
+        call.resolve(JSObject().put("usedMb", if (p?.isAlive == true) kb("/proc/${pid(p)}/status", "VmRSS") else 0).put("maxMb", maxMb)
+            .put("availMb", kb("/proc/meminfo", "MemAvailable")).put("cores", cores).put("cpu", Math.round(cpu * 10) / 10.0)) }
+    @PluginMethod fun getJavaInfo(call: PluginCall) {
+        val m = JSONObject(File(root, nm(call) + "/meta.json").readText()); val mc = m.optString("version"); val pref = m.optInt("java", 0)
+        val inst = JSONArray(); listOf(8, 17, 21, 25).forEach { if (javaBin(it).exists()) inst.put(it) }
+        call.resolve(JSObject().put("mc", mc).put("required", requiredJava(mc)).put("pref", pref).put("active", javaFor(mc, pref)).put("installed", inst)) }
+    @PluginMethod fun paperVersions(call: PluginCall) = bg(call) {
+        val all = mutableListOf<String>()
+        try { val o = JSONObject(get("https://fill.papermc.io/v3/projects/paper")).getJSONObject("versions")
+            for (k in o.keys()) { val arr = o.getJSONArray(k); for (i in 0 until arr.length()) all.add(arr.getString(i)) }
+        } catch (e: Exception) { val arr = JSONObject(get("https://api.papermc.io/v2/projects/paper")).getJSONArray("versions"); for (i in 0 until arr.length()) all.add(arr.getString(i)) }
+        fun key(v: String) = v.split('.').map { it.toIntOrNull() ?: 0 }
+        val sorted = all.filter { Regex("\\d+(\\.\\d+)+").matches(it) }.distinct().sortedWith(Comparator { x, y ->
+            val a = key(x); val b = key(y)
+            for (i in 0 until maxOf(a.size, b.size)) { val c = b.getOrElse(i) { 0 }.compareTo(a.getOrElse(i) { 0 }); if (c != 0) return@Comparator c }
+            0 })
+        call.resolve(JSObject().put("versions", JSONArray(sorted))) }
     @PluginMethod fun getConfig(call: PluginCall) = call.resolve(JSObject(File(root, nm(call) + "/meta.json").readText()))
     @PluginMethod fun saveConfig(call: PluginCall) {
         val f = File(root, nm(call) + "/meta.json"); val m = JSONObject(f.readText())
-        listOf("ramMb", "cores").forEach { k -> call.getInt(k)?.let { m.put(k, it) } }; call.getBoolean("optimize")?.let { m.put("optimize", it) }
+        listOf("ramMb", "cores", "java").forEach { k -> call.getInt(k)?.let { m.put(k, it) } }; call.getBoolean("optimize")?.let { m.put("optimize", it) }
         f.writeText(m.toString()); call.resolve() }
-    @PluginMethod fun changeVersion(call: PluginCall) = bg(call) {   // also used for "reinstall jar"
+    @PluginMethod fun changeVersion(call: PluginCall) = bg(call) {   // change version, switch Paper/Vanilla, or reinstall the jar
         val n = nm(call); require(procs[n]?.isAlive != true) { "Stop the server first" }; val ver = call.getString("version")!!
-        paperDownload(ver, File(root, "$n/paper.jar"), 0, 100)
-        val f = File(root, "$n/meta.json"); f.writeText(JSONObject(f.readText()).put("version", ver).toString()); call.resolve() }
+        val f = File(root, "$n/meta.json"); val m = JSONObject(f.readText()); val sw = call.getString("software") ?: m.optString("software", "paper")
+        serverJar(sw, ver, File(root, n), 0, 100)
+        f.writeText(m.put("version", ver).put("software", sw).toString()); call.resolve() }
     @PluginMethod fun playersList(call: PluginCall) = call.resolve(JSObject().put("list", JSONArray((players[nm(call)] ?: setOf<String>()).toList())))
 
     @PluginMethod fun getNetworkInfo(call: PluginCall) {
@@ -313,6 +408,9 @@ class DeepPixelPlugin : Plugin() {
         tunnel?.destroy(); tunnel = ProcessBuilder(bin.path).directory(context.filesDir).redirectErrorStream(true).start()
         thread { tunnel!!.inputStream.bufferedReader().forEachLine { emit("tunnel", JSONObject().put("line", it)) } }; call.resolve() }
     @PluginMethod fun tunnelStop(call: PluginCall) { tunnel?.destroy(); call.resolve() }
+
+    @PluginMethod fun openUrl(call: PluginCall) {
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(call.getString("url")!!)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); call.resolve() }
 
     // ================= background / battery =================
     @PluginMethod fun requestBatteryOptimization(call: PluginCall) {
