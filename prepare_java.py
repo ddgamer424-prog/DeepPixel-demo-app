@@ -1,14 +1,14 @@
 # Copyright (c) 2026 DDgamer. All rights reserved.
-# Builds the Java runtimes DeepPixel downloads (Java 8, 17, 21, 25 for Android ARM64) and publishes them
+# Builds the Java runtimes DeepPixel downloads (Java 17, 21, 25 for Android ARM64) and publishes them
 # as assets of the "java-runtimes" release in this repository. Run it with the "Prepare Java" workflow.
-import json, os, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request, zipfile
+import gzip, json, lzma, os, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request, zipfile
 
 TOKEN = os.environ.get("GH_TOKEN", "")
 OWN = os.environ.get("GITHUB_REPOSITORY", "")
 REPOS = ["QuestCraftPlusPlus/android-openjdk-build-multiarch",
          "PojavLauncherTeam/android-openjdk-build-multiarch",
          "AngelAuraMC/android-openjdk-build-multiarch"]
-WANTED = [8, 17, 21, 25]
+WANTED = [17, 21, 25]
 TAG = "java-runtimes"
 BAD = re.compile(r"x86|i[3-6]86|amd64|x64|armv7|armeabi|arm32|bin-arm\.|-arm[-_.]", re.I)
 
@@ -74,11 +74,84 @@ def is_arm64(p):
     return h[:4] == b"\x7fELF" and int.from_bytes(h[18:20], "little") == 183
 
 
+def is_android(p):
+    """True only for Java made for Android (uses /system/bin/linker64). Normal Linux Java (glibc) can't run on a phone."""
+    with open(p, "rb") as f: return b"/system/bin/linker64" in f.read(8192)
+
+
 def find_root(dest):
     for dp, _, fn in os.walk(dest):
-        if os.path.basename(dp) == "bin" and "java" in fn and is_arm64(os.path.join(dp, "java")):
-            return os.path.dirname(dp)
+        j = os.path.join(dp, "java")
+        if os.path.basename(dp) == "bin" and "java" in fn and os.path.isfile(j) and is_arm64(j):
+            if is_android(j): return os.path.dirname(dp)
+            print("  skipped a normal Linux (glibc) Java: it cannot run on Android")
     return None
+
+
+# ---- Termux: Java made for Android, with its libraries ----
+TERMUX = "https://packages.termux.dev/apt/termux-main"
+SKIP = {"termux-tools", "termux-exec", "termux-core", "termux-keyring", "termux-licenses", "apt", "dpkg", "bash", "coreutils", "busybox",
+        "gawk", "sed", "grep", "findutils", "util-linux", "ncurses", "readline", "command-not-found", "debianutils", "diffutils", "less", "procps"}
+
+
+def termux_index():
+    for name in ("Packages", "Packages.xz", "Packages.gz"):
+        try:
+            raw = urllib.request.urlopen(urllib.request.Request(f"{TERMUX}/dists/stable/main/binary-aarch64/{name}", headers={"User-Agent": "deeppixel"}), timeout=120).read()
+            raw = lzma.decompress(raw) if name.endswith("xz") else gzip.decompress(raw) if name.endswith("gz") else raw
+            break
+        except Exception as e: print("  index", name, "failed:", e); raw = None
+    if raw is None: return {}
+    idx = {}
+    for block in raw.decode("utf-8", "replace").split("\n\n"):
+        f = dict(re.findall(r"^([A-Za-z-]+): (.*)$", block, re.M))
+        if "Package" in f and "Filename" in f: idx[f["Package"]] = f
+    return idx
+
+
+def termux_closure(idx, root):
+    seen, order, stack = set(), [], [root]
+    while stack:
+        n = stack.pop()
+        if n in seen or n in SKIP or n not in idx: continue
+        seen.add(n); order.append(n)
+        for d in idx[n].get("Depends", "").split(","):
+            alt = re.sub(r"\s*\(.*?\)", "", d.split("|")[0]).strip()
+            if alt: stack.append(alt)
+    return order
+
+
+def termux_build(n, work, idx):
+    pkgs = termux_closure(idx, f"openjdk-{n}")
+    if not pkgs: return None
+    print("  Termux packages:", ", ".join(pkgs))
+    d = tempfile.mkdtemp(dir=work); x = os.path.join(d, "x"); os.makedirs(x)
+    for name in pkgs:
+        deb = os.path.join(d, name + ".deb"); fetch(f"{TERMUX}/{idx[name]['Filename']}", deb)
+        subprocess.run(["dpkg-deb", "-x", deb, x], check=True)
+    usr = os.path.join(x, "data/data/com.termux/files/usr")
+    homes = [os.path.dirname(os.path.dirname(os.path.join(dp, "java"))) for dp, _, fn in os.walk(os.path.join(usr, "lib/jvm")) if os.path.basename(dp) == "bin" and "java" in fn]
+    if not homes: return None
+    tree = os.path.join(d, "tree"); shutil.copytree(homes[0], tree, symlinks=True)
+    deps = os.path.join(tree, "libdeps"); os.makedirs(deps)
+    for f in os.listdir(os.path.join(usr, "lib")):       # libraries the Java files need
+        src = os.path.join(usr, "lib", f)
+        if ".so" in f and os.path.isfile(src): shutil.copy2(src, os.path.join(deps, f))
+    cac = os.path.join(tree, "lib/security/cacerts")      # certificates for https downloads
+    if not os.path.isfile(cac):
+        found = [os.path.join(dp, "cacerts") for dp, _, fn in os.walk(x) if "cacerts" in fn and os.path.isfile(os.path.join(dp, "cacerts"))]
+        if found:
+            if os.path.lexists(cac): os.remove(cac)
+            shutil.copy2(found[0], cac)
+    for junk in ("jmods", "man", "include", "demo", "sample", "lib/src.zip"):
+        shutil.rmtree(os.path.join(tree, junk), ignore_errors=True)
+        if os.path.isfile(os.path.join(tree, junk)): os.remove(os.path.join(tree, junk))
+    j = os.path.join(tree, "bin/java")
+    if not (os.path.isfile(j) and is_arm64(j) and is_android(j)): return None
+    pkg = os.path.join(work, f"jre{n}.tar.gz")
+    def mode(ti): ti.mode = 0o755; return ti
+    with tarfile.open(pkg, "w:gz") as t: t.add(tree, arcname="jre", filter=mode)
+    return pkg
 
 
 def build(n, urls, work):
@@ -106,6 +179,12 @@ def main():
             try: pkg = build(n, urls, work)
             except Exception as e: print("  failed:", e); pkg = None
             if pkg: break
+        if not pkg:
+            print("  trying Java for Android from Termux...")
+            try:
+                if "_tidx" not in globals(): globals()["_tidx"] = termux_index()
+                pkg = termux_build(n, work, globals()["_tidx"])
+            except Exception as e: print("  Termux failed:", e); pkg = None
         if not pkg and n == 21 and OWN:     # earlier release made by this repository
             try:
                 p = os.path.join(work, "jre21.tar.gz"); fetch(f"https://github.com/{OWN}/releases/download/java21/jre.tar.gz", p); pkg = p

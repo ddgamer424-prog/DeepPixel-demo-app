@@ -33,12 +33,12 @@ class DeepPixelPlugin : Plugin() {
     private fun requiredJava(mc: String): Int {
         val p = mc.split('.', '-').map { it.toIntOrNull() ?: 0 }
         val a = p.getOrElse(0) { 1 }; val b = p.getOrElse(1) { 0 }; val c = p.getOrElse(2) { 0 }
-        return when { a >= 26 -> 25; a != 1 -> 21; b >= 21 -> 21; b == 20 && c >= 5 -> 21; b >= 17 -> 17; else -> 8 }
+        return when { a >= 26 -> 25; a != 1 -> 21; b >= 21 -> 21; b == 20 && c >= 5 -> 21; else -> 17 }
     }
-    private fun javaFor(mc: String, pref: Int) = if (pref > 0) pref else requiredJava(mc)
+    private fun javaFor(mc: String, pref: Int) = if (pref > 0) maxOf(pref, 17) else requiredJava(mc)
     private fun javaEnv(pb: ProcessBuilder, v: Int): ProcessBuilder {   // Android doesn't follow the Java folder layout on its own
         val j = jreDir(v).path
-        pb.environment()["LD_LIBRARY_PATH"] = listOf("lib/jli", "lib/server", "lib", "lib/aarch64/jli", "lib/aarch64/server", "lib/aarch64").joinToString(":") { "$j/$it" }
+        pb.environment()["LD_LIBRARY_PATH"] = listOf("lib/jli", "lib/server", "lib", "libdeps", "lib/aarch64/jli", "lib/aarch64/server", "lib/aarch64").joinToString(":") { "$j/$it" }
         pb.environment()["JAVA_HOME"] = j
         val shim = File(context.applicationInfo.nativeLibraryDir, "libtagfix.so")   // turns off Android heap pointer tagging
         if (shim.exists()) pb.environment()["LD_PRELOAD"] = shim.path
@@ -61,7 +61,7 @@ class DeepPixelPlugin : Plugin() {
     /** Installs the wanted Java if needed; if that one can't be downloaded, falls back to the next newer one. */
     private fun ensureJava(want: Int, from: Int, to: Int): Int {
         var last: Throwable? = null
-        for (v in listOf(8, 17, 21, 25).filter { it >= want }) {
+        for (v in listOf(17, 21, 25).filter { it >= want }) {
             try { installJava(v, from, to); return v } catch (e: Throwable) { last = e; if (!javaBin(v).exists()) jreDir(v).deleteRecursively() }
         }
         throw IllegalStateException("Could not get Java $want: ${last?.message}")
@@ -116,7 +116,7 @@ class DeepPixelPlugin : Plugin() {
         if ((call.getString("software") ?: "paper") == "vanilla") {
             val snaps = call.getBoolean("snapshots") == true
             val vs = JSONObject(get(MOJANG)).getJSONArray("versions"); val a = JSONArray()
-            for (i in 0 until vs.length()) { val v = vs.getJSONObject(i); val t = v.getString("type"); if (t == "release" || (snaps && t == "snapshot")) a.put(v.getString("id")) }
+            for (i in 0 until vs.length()) { val v = vs.getJSONObject(i); val t = v.getString("type"); if ((t == "release" || (snaps && t == "snapshot")) && v.optString("releaseTime", "9999") >= "2021-06-08") a.put(v.getString("id")) }
             call.resolve(JSObject().put("versions", a))
         } else paperVersions(call)
     }
@@ -405,7 +405,7 @@ class DeepPixelPlugin : Plugin() {
             .put("availMb", kb("/proc/meminfo", "MemAvailable")).put("cores", cores).put("cpu", Math.round(cpu * 10) / 10.0)) }
     @PluginMethod fun getJavaInfo(call: PluginCall) {
         val m = JSONObject(File(root, nm(call) + "/meta.json").readText()); val mc = m.optString("version"); val pref = m.optInt("java", 0)
-        val inst = JSONArray(); listOf(8, 17, 21, 25).forEach { if (javaBin(it).exists()) inst.put(it) }
+        val inst = JSONArray(); listOf(17, 21, 25).forEach { if (javaBin(it).exists()) inst.put(it) }
         call.resolve(JSObject().put("mc", mc).put("required", requiredJava(mc)).put("pref", pref).put("active", javaFor(mc, pref)).put("installed", inst)) }
     @PluginMethod fun paperVersions(call: PluginCall) = bg(call) {
         val all = mutableListOf<String>()
@@ -413,7 +413,7 @@ class DeepPixelPlugin : Plugin() {
             for (k in o.keys()) { val arr = o.getJSONArray(k); for (i in 0 until arr.length()) all.add(arr.getString(i)) }
         } catch (e: Exception) { val arr = JSONObject(get("https://api.papermc.io/v2/projects/paper")).getJSONArray("versions"); for (i in 0 until arr.length()) all.add(arr.getString(i)) }
         fun key(v: String) = v.split('.').map { it.toIntOrNull() ?: 0 }
-        val sorted = all.filter { Regex("\\d+(\\.\\d+)+").matches(it) }.distinct().sortedWith(Comparator { x, y ->
+        val sorted = all.filter { Regex("\\d+(\\.\\d+)+").matches(it) }.filter { val k = key(it); k[0] >= 26 || (k[0] == 1 && k.getOrElse(1) { 0 } >= 17) }.distinct().sortedWith(Comparator { x, y ->
             val a = key(x); val b = key(y)
             for (i in 0 until maxOf(a.size, b.size)) { val c = b.getOrElse(i) { 0 }.compareTo(a.getOrElse(i) { 0 }); if (c != 0) return@Comparator c }
             0 })

@@ -200,8 +200,8 @@ body.indetail header.brand,body.indetail nav{display:none}body.indetail{padding-
   <label class="row" id="csnapw" style="gap:10px"><input id="csnap" type="checkbox" style="width:auto"> Include snapshots</label>
   <div class="row" style="margin-top:8px"><select id="cver" class="grow"></select><button id="cvb">Apply</button></div><p class="mut" id="cvt"></p></div></div>
  <div class="card sc"><div class="si warm"><svg viewBox="0 0 24 24"><path d="M5 9h12v5a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5zM17 10h1.5a2 2 0 0 1 0 4H17M9 3v3M12 3v3M15 3v3"/></svg></div><div class="sb"><b>Java version</b>
-  <p class="mut">Auto picks the right Java for your Minecraft version (Java 8, 17, 21 or 25) and installs it the first time it is needed.</p>
-  <div class="row"><select id="cjv" class="grow"><option value="0">Auto (recommended)</option><option value="8">Java 8</option><option value="17">Java 17</option><option value="21">Java 21</option><option value="25">Java 25</option></select><button id="cja">Apply</button></div><p class="mut" id="cji"></p></div></div>
+  <p class="mut">Auto picks the right Java for your Minecraft version (Java 17, 21 or 25) and installs it the first time it is needed.</p>
+  <div class="row"><select id="cjv" class="grow"><option value="0">Auto (recommended)</option><option value="17">Java 17</option><option value="21">Java 21</option><option value="25">Java 25</option></select><button id="cja">Apply</button></div><p class="mut" id="cji"></p></div></div>
  <div class="card"><b>Resources</b><label>RAM: <span id="cr">1024</span> MB</label><input id="cram" type="range" min="512" max="6144" step="256">
   <label>CPU cores: <span id="cc">0</span> (0 = all)</label><input id="ccores" type="range" min="0" max="8" step="1">
   <label class="row" style="gap:10px"><input id="copt" type="checkbox" style="width:auto"> Optimized Java flags</label><button id="csv" style="width:100%;margin-top:8px">Save resources</button></div>
@@ -246,7 +246,7 @@ const fmtSize=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).t
 const fmtNum=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n);
 const swName=s=>s==='vanilla'?'Vanilla':'Paper';
 const copy=async(t,btn,label)=>{try{await navigator.clipboard.writeText(t);if(btn){btn.textContent='Copied';setTimeout(()=>btn.textContent=label,1200)}}catch(e){prompt('Copy this',t)}};
-function reqJava(mc){const p=String(mc).split(/[.-]/).map(x=>parseInt(x)||0),a=p[0]??1,b=p[1]??0,c=p[2]??0;return a>=26?25:a!==1?21:b>=21?21:(b===20&&c>=5)?21:b>=17?17:8}
+function reqJava(mc){const p=String(mc).split(/[.-]/).map(x=>parseInt(x)||0),a=p[0]??1,b=p[1]??0,c=p[2]??0;return a>=26?25:a!==1?21:b>=21?21:(b===20&&c>=5)?21:17}
 function item(list,title,sub,btns){const d=mk_('div','card row'),g=mk_('div','grow');g.append(mk_('b',null,title));if(sub)g.append(mk_('div','mut',sub));d.append(g);
  btns.forEach(([t,f,c])=>{const x=mk_('button',c||'alt',t);x.onclick=f;d.append(x)});list.append(d)}
 const pollProg=t=>{progT=t;const iv=setInterval(async()=>{try{hub.progress(await N.getProgress())}catch(e){}},700);return()=>{clearInterval(iv);progT=null}};
@@ -290,7 +290,7 @@ async function renderList(){const {servers}=await N.listServers();const el=$('se
   const b=mk_('button','alt','Manage');b.onclick=()=>open(s);d.append(b);el.append(d)})}
 
 // ---- versions (every Minecraft version) ----
-const VC={},FALLBACK=['1.21.4','1.21.1','1.20.4','1.19.4','1.18.2','1.16.5','1.12.2','1.8.8'];
+const VC={},FALLBACK=['1.21.4','1.21.1','1.20.4','1.19.4','1.18.2','1.17.1'];
 async function versions(s,snap){const k=s+(snap?'+s':'');if(!VC[k]){try{VC[k]=(await N.mcVersions({software:s,snapshots:!!snap})).versions||[]}catch(e){VC[k]=[]}if(!VC[k].length){delete VC[k];return FALLBACK}}return VC[k]}
 async function fillVersions(selSw,selVer,snapEl,keep){const list=await versions(selSw.value,snapEl&&snapEl.checked),old=keep||selVer.value;selVer.innerHTML='';list.forEach(v=>selVer.append(new Option(v,v)));selVer.value=list.includes(old)?old:list[0]}
 
@@ -405,7 +405,7 @@ $('bkw').onclick=()=>mkb(false);$('bkf').onclick=()=>mkb(true);$('bkr').onclick=
 // ---- server settings: version, Java, resources ----
 async function loadSettings(){const c=await A('getConfig');$('cram').value=c.ramMb||1024;$('cr').textContent=$('cram').value;$('ccores').value=c.cores||0;$('cc').textContent=$('ccores').value;$('copt').checked=c.optimize!==false;
  $('csw').value=sw;$('csnapw').classList.toggle('hide',sw!=='vanilla');$('cur').textContent='Current: '+swName(sw)+' '+ver;await fillVersions($('csw'),$('cver'),$('csnap'),ver);await javaInfo()}
-async function javaInfo(){try{const j=await A('getJavaInfo');$('cjv').value=String(j.pref||0);
+async function javaInfo(){try{const j=await A('getJavaInfo');$('cjv').value=String(j.pref>=17?j.pref:0);
  $('cji').textContent='Active runtime: Java '+j.active+(j.pref?' (your choice)':' (automatic for Minecraft '+j.mc+')')+'. Installed: '+((j.installed||[]).map(x=>'Java '+x).join(', ')||'none yet')+'.'}catch(e){}}
 async function swChange(){$('csnapw').classList.toggle('hide',$('csw').value!=='vanilla');await fillVersions($('csw'),$('cver'),$('csnap'))}
 $('csw').onchange=swChange;$('csnap').onchange=swChange;
