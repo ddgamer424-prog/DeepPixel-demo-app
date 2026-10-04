@@ -161,7 +161,7 @@ body.indetail header.brand,body.indetail nav{display:none}body.indetail{padding-
 <div class="pane" id="p-console"><div class="card"><div class="row"><span class="dot" id="dd"></span><b id="dstate" class="grow">Offline</b></div>
   <div class="row" style="margin-top:12px"><button id="go" class="grow">Start</button><button id="stp" class="bad">Stop</button><button id="rs" class="alt">Restart</button></div>
   <div class="chip" id="dpath" style="word-break:break-all;margin:10px 0 0"></div></div>
- <div class="card" id="addrc"><div class="mut">Join address</div><div id="addr" class="addr">-</div><div class="mut" id="addrh"></div><button id="cpy" class="alt" style="margin-top:10px">Copy address</button></div>
+ <div class="card" id="addrc"><div class="mut">Join address</div><div id="addr" class="addr">-</div><div class="mut" id="addrh"></div><button id="cpy" class="alt" style="margin-top:10px">Copy address</button><div class="hide" id="addrbw" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="mut">Bedrock address</div><div id="addrbip" class="addr">-</div><div class="mut">Port <b id="addrbport" style="color:var(--tx)">19132</b> (UDP)</div><div class="row" style="margin-top:10px"><button class="alt grow" id="cpyb1">Copy IP</button><button class="alt grow" id="cpyb2">Copy port</button></div></div></div>
  <div id="log"></div><div class="row" style="margin-top:8px"><input id="cmd" placeholder="Command, e.g. op Steve"><button id="snd">Send</button></div></div>
 <div class="pane" id="p-log"><div class="row"><b class="grow">logs/latest.log</b><button class="alt" id="lgr">Refresh</button></div><pre class="logbox" id="lgt"></pre></div>
 <div class="pane" id="p-files"><div class="row"><b class="grow" id="cwd">/</b><label class="mut" style="margin:0">Upload <input id="up" type="file" multiple hidden></label></div>
@@ -175,6 +175,22 @@ body.indetail header.brand,body.indetail nav{display:none}body.indetail{padding-
 <div class="pane" id="p-players"><div class="card"><b>Online now</b><div id="pll"></div></div>
  <div class="card"><b>Add a player</b><input id="acn" placeholder="Player name" style="margin-top:8px"><div class="row" style="margin-top:10px;flex-wrap:wrap"><button id="acw" class="grow">Whitelist</button><button id="aco" class="alt grow">Operator</button><button id="acb" class="bad">Ban</button></div><p class="mut" id="acm"></p></div>
  <h3>Whitelist</h3><div id="acwl"></div><h3>Operators</h3><div id="acol"></div><h3>Banned</h3><div id="acbl"></div></div>
+<div class="pane" id="p-bedrock">
+ <div id="bdvan" class="card hide"><b>Paper is needed</b><p class="mut">Bedrock support uses plugins, which Vanilla servers can't load. Switch the software to Paper in Server Settings first.</p></div>
+ <div id="bdmain">
+  <div class="card tun"><div class="globe"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="10" rx="5"/><path d="M8 11v4M6 13h4M16 12h.01M18 14h.01"/></svg></div>
+   <span class="pill" id="bdst">NOT SET UP</span><h2>Bedrock Edition support</h2>
+   <p class="mut">Let Bedrock players (phones, tablets, consoles and Windows) join your Java server. One tap installs Geyser and Floodgate and sets them up for you. Bedrock players don't need a Java account.</p>
+   <label class="row" style="gap:10px;text-align:left"><input id="bdvia" type="checkbox" checked style="width:auto"> Also install ViaVersion and ViaBackwards (helps newer game versions join)</label>
+   <button id="bdgo" style="width:100%;margin-top:12px">Set up Bedrock support</button>
+   <p class="mut" id="bdlog"></p><p class="mut" id="bdp"></p></div>
+  <div class="card hide" id="bdinfo"><b>How Bedrock players join</b>
+   <p class="mut">In Minecraft Bedrock: Play, Servers, Add Server. Enter these two values.</p>
+   <div class="row" style="margin-top:8px"><span class="mut" style="width:64px">Address</span><code class="codepath grow" id="bdip">-</code><button class="alt" id="bdcip">Copy</button></div>
+   <div class="row" style="margin-top:8px"><span class="mut" style="width:64px">Port</span><code class="codepath grow" id="bdport">19132</code><button class="alt" id="bdcpt">Copy</button></div>
+   <p class="mut">This works on the same Wi-Fi or hotspot. For friends over the internet, make a <b>Minecraft Bedrock</b> (UDP) tunnel on playit.gg for this port.</p>
+   <button class="bad" id="bdrm" style="width:100%">Remove Bedrock support</button></div>
+ </div></div>
 <div class="pane" id="p-options"><div class="card"><b>Server properties</b><div id="pf"></div><button id="fsp" style="width:100%;margin-top:14px">Save properties</button><details style="margin-top:14px"><summary class="mut">Advanced: edit the raw file</summary><textarea id="props" style="margin-top:8px"></textarea><button id="sp" class="alt" style="width:100%;margin-top:8px">Save raw file</button></details></div></div>
 <div class="pane" id="p-backups"><div class="card row"><span class="mut">Storage path</span><code class="grow codepath" id="bkpath">-</code><button class="alt" id="bkcp">Copy path</button></div>
  <div class="card"><b>Create new backup</b><p class="mut">Select what to include in the compressed archive.</p><div class="row"><button id="bkf" class="grow">Full server</button><button id="bkw" class="alt grow">Worlds only</button></div><p class="mut" id="bkt"></p></div>
@@ -194,7 +210,7 @@ body.indetail header.brand,body.indetail nav{display:none}body.indetail{padding-
 <div class="pane" id="p-tunnel"><div class="card tun"><div class="globe"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg></div>
   <span class="pill" id="tst">MOBILE TUNNEL READY</span><h2>Playit.gg public IP tunnel</h2>
   <p class="mut">Playit gives you a free public address so friends can join over the internet, with no port forwarding.</p>
-  <div class="steps"><b>How to set it up</b><ol><li>Start your server, then tap <b>Start tunnel</b>.</li><li>Open the <b>claim link</b> that appears and sign in to playit.gg (free).</li><li>Create a Minecraft Java tunnel for this server's port and copy the public address.</li></ol></div>
+  <div class="steps"><b>How to set it up</b><ol><li>Start your server, then tap <b>Start tunnel</b>.</li><li>Open the <b>claim link</b> that appears and sign in to playit.gg (free).</li><li>Create a Minecraft Java tunnel for this server's port and copy the public address.</li><li>For Bedrock players, also create a <b>Minecraft Bedrock</b> tunnel (port 19132, UDP) once Bedrock support is set up.</li></ol></div>
   <div class="row"><button id="tn" class="grow">Start tunnel</button><button id="tx" class="alt">Stop</button></div>
   <button id="tnlink" class="alt hide" style="width:100%;margin-top:10px">Open claim link</button>
   <div class="row hide" id="tnac" style="margin-top:10px"><code class="codepath grow" id="tnaddr"></code><button id="tncp" class="alt">Copy address</button></div>
@@ -243,14 +259,14 @@ const IC={console:'<path d="M5 7l5 5-5 5"/><path d="M13 18h6"/>',log:'<path d="M
  players:'<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4.5 2 4.5 5"/>',
  options:'<path d="M5 4v16M12 4v16M19 4v16"/><path d="M3 9h4M10 15h4M17 8h4"/>',backups:'<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>',
  settings:'<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8"/>',
- tunnel:'<path d="M3 12h4l3-8 4 16 3-8h4"/>',back:'<path d="M15 5l-7 7 7 7"/>'};
+ tunnel:'<path d="M3 12h4l3-8 4 16 3-8h4"/>',bedrock:'<rect x="3" y="8" width="18" height="10" rx="5"/><path d="M8 11v4M6 13h4M16 12h.01M18 14h.01"/>',back:'<path d="M15 5l-7 7 7 7"/>'};
 const svg=k=>'<svg viewBox="0 0 24 24">'+IC[k]+'</svg>';
 
 // ---- hub (events from the phone side) ----
 const hub={
  console:d=>{if(d.name===cur){const l=$('log');l.textContent+=d.line+'\n';l.scrollTop=l.scrollHeight}},
  state:d=>{if(d.name===cur){paint(d.state);if(d.state==='stopped'){onl=[];renderPlayers()}if(d.state==='stopped'&&restartPending){restartPending=false;setTimeout(()=>N.start({name:cur}),800)}}renderList()},
- progress:d=>{if(progT==='create'){$('pg').style.width=d.pct+'%';$('pt').textContent=d.text}else if(progT==='bk')$('bkt').textContent=d.pct<100?d.text:'';else if(progT==='ver')$('cvt').textContent=d.text},
+ progress:d=>{if(progT==='create'){$('pg').style.width=d.pct+'%';$('pt').textContent=d.text}else if(progT==='bk')$('bkt').textContent=d.pct<100?d.text:'';else if(progT==='ver')$('cvt').textContent=d.text;else if(progT==='bd')$('bdp').textContent=d.text},
  players:d=>{if(d.name===cur){onl=d.list;renderPlayers()}},
  tunnel:d=>tunLine(d.line)};
 
@@ -306,7 +322,7 @@ setInterval(pollStats,2000);
 
 // ---- pager inside a server + side menu ----
 const MENU=[['console','Console','Terminal & live commands'],['log','Server Log','latest.log viewer'],['files','File Manager','Configs, plugins & files'],['plugins','Plugin Manager','Modrinth store & upload .jar'],
- ['worlds','World Manager','Import, delete & choose worlds'],['players','Player Manager','OPs, whitelist & bans'],['options','Server Properties','Port, MOTD, gamemode, PvP'],['backups','Backups','Full snapshot restore'],
+ ['worlds','World Manager','Import, delete & choose worlds'],['players','Player Manager','OPs, whitelist & bans'],['bedrock','Bedrock Support','Geyser + Floodgate, one tap'],['options','Server Properties','Port, MOTD, gamemode, PvP'],['backups','Backups','Full snapshot restore'],
  ['settings','Server Settings','RAM, CPU, version, Java'],['tunnel','Playit Tunnel','Free public domain tunnel']];
 const order=MENU.map(m=>m[0]);let curTab='console',stt;
 const pane=id=>$('p-'+id);
@@ -326,7 +342,7 @@ $('menub').onclick=openDrawer;$('dclose').onclick=closeDrawer;$('dscrim').onclic
 addEventListener('popstate',()=>{if(skipPop){skipPop=false;return}if(!$('drawer').classList.contains('hide')){hideDrawer();return}if(!$('detail').classList.contains('hide'))show('servers')});
 $('alogo').src=$('dlogo').src=document.querySelector('header.brand img').src;
 const load={console:()=>showAddr(),log:()=>loadLog(),files:()=>fl(),plugins:()=>plInit(),worlds:()=>wl(),players:async()=>{try{onl=(await A('playersList')).list||[]}catch(e){}renderPlayers();loadAccess()},
- options:async()=>{const pt=(await A('getProps')).text||'';$('props').value=pt;renderProps(pt)},backups:()=>bl(),settings:()=>loadSettings(),tunnel:()=>{}};
+ bedrock:()=>loadBedrock(),options:async()=>{const pt=(await A('getProps')).text||'';$('props').value=pt;renderProps(pt)},backups:()=>bl(),settings:()=>loadSettings(),tunnel:()=>{}};
 
 // ---- plugin manager ----
 const CATS=[['','All'],['utility','Utility'],['management','Management'],['optimization','Optimization'],['economy','Economy'],['social','Social'],['game-mechanics','Game mechanics'],['worldgen','Worldgen'],['library','Library'],['adventure','Adventure'],['minigame','Minigame'],['mobs','Mobs'],['magic','Magic']];
@@ -449,14 +465,44 @@ async function acCmd(c){if(!running){alert('Start the server first.');return}awa
 const acn=()=>$('acn').value.trim();
 $('acw').onclick=()=>acn()&&acCmd('whitelist add '+acn());$('aco').onclick=()=>acn()&&acCmd('op '+acn());$('acb').onclick=()=>acn()&&acCmd('ban '+acn());
 
+// ---- Bedrock (Geyser + Floodgate) ----
+const bd={busy:false},sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function srvState(){const l=(await N.listServers()).servers.find(s=>s.name===cur);return l?l.state:'stopped'}
+async function waitState(want,ms){const t=Date.now();while(Date.now()-t<ms){if((await srvState())===want)return true;await sleep(1000)}return false}
+async function restartServer(){if(await srvState()==='running'){N.stop({name:cur});if(!await waitState('stopped',120000))throw new Error('The server did not stop in time.')}await N.start({name:cur})}
+async function loadBedrock(){const van=sw==='vanilla';$('bdvan').classList.toggle('hide',!van);$('bdmain').classList.toggle('hide',van);if(van)return;
+ const i=await A('bedrockInfo'),ready=i.geyser&&i.floodgate&&i.configured&&i.auth==='floodgate';
+ $('bdst').textContent=bd.busy?'SETTING UP…':ready?'BEDROCK READY':(i.geyser||i.floodgate)?'PARTLY SET UP':'NOT SET UP';
+ $('bdgo').textContent=ready?'Run setup again':'Set up Bedrock support';$('bdinfo').classList.toggle('hide',!(i.geyser&&i.configured));
+ $('bdip').textContent=lastIp||'Connect to Wi-Fi';$('bdport').textContent=i.port}
+$('bdgo').onclick=async()=>{if(bd.busy)return;bd.busy=true;$('bdgo').disabled=true;const say=t=>$('bdlog').textContent=t;$('bdp').textContent='';let done=()=>{};
+ try{done=pollProg('bd');
+  say('1/4 Installing Geyser…');await A('pluginInstall',{id:'geyser',version:ver,lenient:true});
+  say('2/4 Installing Floodgate…');await A('pluginInstall',{id:'floodgate',version:ver,lenient:true});
+  if($('bdvia').checked){say('Installing ViaVersion and ViaBackwards…');for(const id of['viaversion','viabackwards']){try{await A('pluginInstall',{id,version:ver,lenient:true})}catch(e){}}}
+  done();$('bdp').textContent='';
+  say('3/4 Restarting the server so Geyser can create its settings. This can take a minute…');await restartServer();
+  let ok=false;for(let k=0;k<90;k++){if((await A('bedrockInfo')).configured){ok=true;break}await sleep(2000)}
+  if(!ok)throw new Error('Geyser did not create its settings. Check the Server Log.');
+  say('4/4 Applying Bedrock settings…');const r=await A('bedrockApply');
+  if(r.changed){say('Restarting the server to apply the settings…');await restartServer()}
+  say('Done! Bedrock players can join with the address below.')}
+ catch(e){done();say('Setup stopped: '+(e.message||e))}
+ bd.busy=false;$('bdgo').disabled=false;loadBedrock()};
+$('bdrm').onclick=async()=>{if(!confirm('Remove Geyser and Floodgate from this server?'))return;if(running){alert('Stop the server first.');return}
+ for(const p of(await A('pluginsList')).plugins||[])if(/geyser|floodgate/i.test(p.file))await A('pluginDelete',{file:p.file});$('bdlog').textContent='Bedrock support removed.';loadBedrock()};
+$('bdcip').onclick=()=>copy(lastIp,$('bdcip'),'Copy');$('bdcpt').onclick=()=>copy($('bdport').textContent,$('bdcpt'),'Copy');
+
 // ---- join address ----
-let addrText='';
+let addrText='',lastIp='';
 async function showAddr(){if(!cur||$('detail').classList.contains('hide'))return;try{const r=await A('getNetworkInfo');const ips=r.ips||[];const w=ips.find(i=>/^(wlan|swlan|ap)/.test(i.iface))||ips[0];
  if(!w){addrText='';$('addr').textContent='No network';$('addrh').textContent='Connect to Wi-Fi or turn on your hotspot.';return}
- addrText=w.ip+':'+r.port;$('addr').textContent=addrText;
+ addrText=w.ip+':'+r.port;lastIp=w.ip;$('addr').textContent=addrText;
+ try{const bi=await A('bedrockInfo');$('addrbw').classList.toggle('hide',!(bi.geyser&&bi.configured));$('addrbip').textContent=w.ip;$('addrbport').textContent=bi.port}catch(e){}
  const o=ips.filter(i=>i!==w).map(i=>i.ip+' ('+i.iface+')').join(', ');
  $('addrh').textContent='Players on the same Wi-Fi or hotspot can join with this address.'+(o?' Other addresses: '+o+'.':'')+' For friends over the internet, use the Playit Tunnel.'}catch(e){}}
 $('cpy').onclick=()=>addrText&&copy(addrText,$('cpy'),'Copy address');
+$('cpyb1').onclick=()=>lastIp&&copy(lastIp,$('cpyb1'),'Copy IP');$('cpyb2').onclick=()=>copy($('addrbport').textContent,$('cpyb2'),'Copy port');
 setInterval(showAddr,5000);
 
 // ---- phone storage + folder chooser ----

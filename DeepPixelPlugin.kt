@@ -268,12 +268,51 @@ class DeepPixelPlugin : Plugin() {
         val idx = if (q.isEmpty()) "downloads" else "relevance"
         val hits = JSONObject(get("https://api.modrinth.com/v2/search?limit=20&offset=${call.getInt("offset") ?: 0}&index=$idx&query=${enc(q)}&facets=${enc(facets.toString())}")).getJSONArray("hits")
         call.resolve(JSObject().put("hits", hits)) }
+    /** Finds the plugin file on Modrinth: exact Minecraft version first; if lenient, the newest release for any version. */
+    private fun modrinthFile(id: String, ver: String, lenient: Boolean): JSONObject? {
+        val loaders = listOf("paper", "spigot", "bukkit")
+        fun pick(v: JSONArray): JSONObject? {
+            if (v.length() == 0) return null
+            val files = v.getJSONObject(0).getJSONArray("files")
+            for (i in 0 until files.length()) if (files.getJSONObject(i).optBoolean("primary")) return files.getJSONObject(i)
+            return files.getJSONObject(0)
+        }
+        for (l in loaders) pick(JSONArray(get("https://api.modrinth.com/v2/project/$id/version?loaders=${enc("[\"$l\"]")}&game_versions=${enc("[\"$ver\"]")}")))?.let { return it }
+        if (lenient) for (l in loaders) pick(JSONArray(get("https://api.modrinth.com/v2/project/$id/version?loaders=${enc("[\"$l\"]")}")))?.let { return it }
+        return null
+    }
     @PluginMethod fun pluginInstall(call: PluginCall) = bg(call) {
-        val v = JSONArray(get("https://api.modrinth.com/v2/project/${call.getString("id")}/version?loaders=${enc("[\"paper\"]")}&game_versions=${enc("[\"${call.getString("version")}\"]")}"))
-        require(v.length() > 0) { "No release for this Minecraft version" }
-        val file = v.getJSONObject(0).getJSONArray("files").getJSONObject(0)
+        val file = modrinthFile(call.getString("id")!!, call.getString("version")!!, call.getBoolean("lenient") == true)
+        require(file != null) { "No release for this Minecraft version" }
         val dir = File(root, nm(call) + "/plugins").apply { mkdirs() }
         download(file.getString("url"), File(dir, file.getString("filename")), 0, 100, "Installing ${file.getString("filename")}"); call.resolve() }
+    // ---- Bedrock support (Geyser + Floodgate) ----
+    private fun geyserConfig(n: String) = File(root, "$n/plugins/Geyser-Spigot/config.yml")
+    @PluginMethod fun bedrockInfo(call: PluginCall) {
+        val n = nm(call)
+        val names = File(root, "$n/plugins").listFiles()?.map { it.name.lowercase() } ?: emptyList()
+        val cfg = geyserConfig(n); var port = 19132; var auth = ""
+        if (cfg.exists()) { var sec = ""
+            cfg.readLines().forEach { l ->
+                if (l.isNotEmpty() && !l[0].isWhitespace() && !l.startsWith("#")) sec = l.substringBefore(":").trim()
+                val m = Regex("^\\s+(port|auth-type):\\s*(\\S+)").find(l)
+                if (m != null) {
+                    if (sec == "bedrock" && m.groupValues[1] == "port") port = m.groupValues[2].toIntOrNull() ?: port
+                    if (sec == "remote" && m.groupValues[1] == "auth-type") auth = m.groupValues[2].trim('"', '\'')
+                } } }
+        call.resolve(JSObject().put("geyser", names.any { it.startsWith("geyser") && it.endsWith(".jar") })
+            .put("floodgate", names.any { it.startsWith("floodgate") && it.endsWith(".jar") })
+            .put("configured", cfg.exists()).put("port", port).put("auth", auth)) }
+    /** Makes Geyser use Floodgate logins, so Bedrock players can join without a Java account. */
+    @PluginMethod fun bedrockApply(call: PluginCall) {
+        val f = geyserConfig(nm(call))
+        if (!f.exists()) { call.reject("Geyser has not created its settings yet. Start the server once."); return }
+        val lines = f.readLines().toMutableList(); var sec = ""; var changed = false
+        for (i in lines.indices) { val l = lines[i]
+            if (l.isNotEmpty() && !l[0].isWhitespace() && !l.startsWith("#")) sec = l.substringBefore(":").trim()
+            if (sec == "remote" && Regex("^\\s+auth-type:").containsMatchIn(l) && !l.contains("floodgate")) { lines[i] = l.substringBefore("auth-type:") + "auth-type: floodgate"; changed = true } }
+        if (changed) f.writeText(lines.joinToString("\n") + "\n")
+        call.resolve(JSObject().put("changed", changed)) }
     @PluginMethod fun pluginsList(call: PluginCall) {
         val a = JSONArray(); File(root, nm(call) + "/plugins").listFiles()?.filter { it.name.contains(".jar") }?.sortedBy { it.name }
             ?.forEach { a.put(JSONObject().put("file", it.name).put("enabled", it.name.endsWith(".jar"))) }
