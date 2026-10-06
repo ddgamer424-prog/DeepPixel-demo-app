@@ -287,6 +287,19 @@ class DeepPixelPlugin : Plugin() {
         val dir = File(root, nm(call) + "/plugins").apply { mkdirs() }
         download(file.getString("url"), File(dir, file.getString("filename")), 0, 100, "Installing ${file.getString("filename")}"); call.resolve() }
     // ---- Bedrock support (Geyser + Floodgate) ----
+    /** Geyser and Floodgate for Paper/Spigot come from GeyserMC's own download site (Modrinth only has Floodgate for Fabric/NeoForge). */
+    @PluginMethod fun bedrockInstall(call: PluginCall) = bg(call) {
+        val n = nm(call); require(procs[n]?.isAlive != true) { "Stop the server first" }
+        val dir = File(root, "$n/plugins").apply { mkdirs() }
+        dir.listFiles()?.filter { val l = it.name.lowercase(); (l.contains("geyser") || l.contains("floodgate")) && l.contains(".jar") }?.forEach { it.delete() }
+        val base = "https://download.geysermc.org/v2/projects"
+        for ((proj, file, from) in listOf(Triple("geyser", "Geyser-Spigot.jar", 0), Triple("floodgate", "floodgate-spigot.jar", 70))) {
+            val out = File(dir, file)
+            download("$base/$proj/versions/latest/builds/latest/downloads/spigot", out, from, if (from == 0) 70 else 100, if (proj == "geyser") "Installing Geyser" else "Installing Floodgate")
+            val ok = out.length() > 100_000 && out.inputStream().use { it.read() == 'P'.code && it.read() == 'K'.code }
+            if (!ok) { out.delete(); throw IllegalStateException("Could not download $proj from geysermc.org. Check your internet and try again.") }
+        }
+        call.resolve() }
     private fun geyserConfig(n: String) = File(root, "$n/plugins/Geyser-Spigot/config.yml")
     @PluginMethod fun bedrockInfo(call: PluginCall) {
         val n = nm(call)

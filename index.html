@@ -477,8 +477,8 @@ async function loadBedrock(){const van=sw==='vanilla';$('bdvan').classList.toggl
  $('bdip').textContent=lastIp||'Connect to Wi-Fi';$('bdport').textContent=i.port}
 $('bdgo').onclick=async()=>{if(bd.busy)return;bd.busy=true;$('bdgo').disabled=true;const say=t=>$('bdlog').textContent=t;$('bdp').textContent='';let done=()=>{};
  try{done=pollProg('bd');
-  say('1/4 Installing Geyser…');await A('pluginInstall',{id:'geyser',version:ver,lenient:true});
-  say('2/4 Installing Floodgate…');await A('pluginInstall',{id:'floodgate',version:ver,lenient:true});
+  if(await srvState()==='running'){say('Stopping the server first…');N.stop({name:cur});if(!await waitState('stopped',120000))throw new Error('The server did not stop in time.')}
+  say('1/4 Installing Geyser and Floodgate from geysermc.org…');await A('bedrockInstall');
   if($('bdvia').checked){say('Installing ViaVersion and ViaBackwards…');for(const id of['viaversion','viabackwards']){try{await A('pluginInstall',{id,version:ver,lenient:true})}catch(e){}}}
   done();$('bdp').textContent='';
   say('3/4 Restarting the server so Geyser can create its settings. This can take a minute…');await restartServer();
